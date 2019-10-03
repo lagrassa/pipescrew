@@ -58,17 +58,19 @@ class PipeGraspAgent():
         print("gripper force", self.get_gripper_force())
 
     def squeeze(self, force):
-        force_history = deque(maxlen=2)
-        k=0.00054
+        self.squeeze_force = force
+        diffs = deque(maxlen=5)
+        k=0.00052
         kp = 0.00008# 0.00015
         n_tries = 400
+        tol = 0.1
         for i in range(n_tries):
             curr_force = self.get_gripper_force()
-            print("curr force", curr_force)
             diff = force-curr_force
-            force_history.append(curr_force)
-            if len(force_history) == 2:
-                deriv_diff= force_history[1]-force_history[0]
+            print("curr force",curr_force)
+            diffs.append(curr_force)
+            if len(diffs) == 2:
+                deriv_diff= diffs[1]-diffs[0]
             else:
                 deriv_diff=0
             curr_pos = p.getJointState(self.pw.robot,9)[0]
@@ -77,8 +79,7 @@ class PipeGraspAgent():
             self.target_grip = target
             simulate_for_duration(0.1)
             
-            if len(force_history) > 3 and abs(np.mean(force_history[-3:])-force) < 0.1:
-                import ipdb; ipdb.set_trace()
+            if len(diffs) > 3 and abs(diff) < tol and abs(np.mean(list(diffs)[-3:])-force) < tol:
                 print("achieved at i= ", i)
                 break 
         if n_tries == i-1:
@@ -99,10 +100,9 @@ class PipeGraspAgent():
                 for conf in motion_plan:
                     self.go_to_conf(conf)
                     if self.pipe_attach is not None:
-                        self.squeeze(force=1.9)
+                        self.squeeze(force=self.squeeze_force)
             ee_loc = p.getLinkState(self.pw.robot, 8)[0]
             distance = np.linalg.norm(np.array(ee_loc)-target_pose[0])
-            print("distance", distance)
             if distance < 1e-3:
                 break
 
@@ -111,8 +111,7 @@ class PipeGraspAgent():
 pga = PipeGraspAgent(visualize=True)
 pga.change_grip(0.025, force=0)
 pga.approach()
-pga.change_grip(0.005, force=1.9) # force control this. 1 was ok
-import ipdb; ipdb.set_trace()
+pga.change_grip(0.005, force=0.7) # force control this. 1 was ok
 simulate_for_duration(2.0)
 pga.place()
 #pga.insert()
