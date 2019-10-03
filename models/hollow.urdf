@@ -1,0 +1,30 @@
+<?xml version="0.0" ?>
+<robot name="hollow.urdf">
+  <link name="baseLink">
+    <contact>
+      <friction_anchor/>
+      <lateral_friction value="0.4"/>
+    </contact>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+       <mass value="0.3"/>
+       <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="hollow.obj" scale="0.2 0.2 0.2"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="dummy">
+          <geometry>
+                  <sphere radius="0.001"/>
+          </geometry>
+  </link>
+  <joint name = "joint" type="fixed">
+          <parent link="baseLink"/>
+          <child link="dummy"/>
+  </joint>
+</robot>
+
