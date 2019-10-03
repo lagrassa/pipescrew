@@ -26,11 +26,11 @@ class PipeWorld():
     def setup_workspace(self):
         self.floor = p.loadURDF("../models/short_floor.urdf")
         p.changeDynamics(self.floor, -1, mass=0)
-        self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.022)
+        self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
         p.changeDynamics(self.hollow, -1, mass=0)
         set_pose(self.hollow, ((0.0,0,0.001),(0,0.5,0.5,0)))
         self.pipe = create_cylinder(0.01, 0.1, mass=1, color=(0, 0, 1, 1))
-        p.changeDynamics(self.pipe, -1, mass=0.3, lateralFriction=0.99, rollingFriction=0.99, spinningFriction=0.99, restitution=0.1)
+        p.changeDynamics(self.pipe, -1, mass=0.3, lateralFriction=0.99, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
         set_point(self.pipe, (0,0.08,0.015))
 
 

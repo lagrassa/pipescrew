@@ -1,4 +1,5 @@
 from pipeworld import PipeWorld
+from collections import deque
 import pybullet as p
 import numpy as np
 from pybullet_tools.utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
@@ -7,6 +8,7 @@ class PipeGraspAgent():
         self.pw = PipeWorld(visualize=visualize)
         self.ee_link =8# 8#joint_from_name(self.pw.robot, "panda_hand_joint")
         self.joints=[1,2,3,4,5,6,7]
+        self.target_grip = 0.015
         self.pipe_attach=None
         self.finger_joints = (9,10)# [joint_from_name(self.pw.robot,"panda_finger_joint"+str(side)) for side in [1,2]]
         p.enableJointForceTorqueSensor(self.pw.robot, 9)
@@ -15,7 +17,7 @@ class PipeGraspAgent():
 
 
     def approach(self):
-        grasp = np.array([0,0,0.15])
+        grasp = np.array([0,0,0.2])
         target_point_1 = np.array(get_pose(self.pw.pipe))[0]+grasp
         grasp = np.array([0,0,0.13])
         target_point_2 = np.array(get_pose(self.pw.pipe))[0]+grasp
@@ -28,7 +30,7 @@ class PipeGraspAgent():
         self.pipe_attach = create_attachment(self.pw.robot, self.ee_link, self.pw.pipe)
         
     def place(self):
-        grasp = np.array([0,0,0.28])
+        grasp = np.array([0,0,0.3])
         target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
         target_quat = (1,0.5,0,0)
         target_pose = (target_point, target_quat)
@@ -51,24 +53,43 @@ class PipeGraspAgent():
 
 
     def go_to_conf(self, conf):
-        control_joints(self.pw.robot, get_movable_joints(self.pw.robot), conf)
+        control_joints(self.pw.robot, get_movable_joints(self.pw.robot)+list(self.finger_joints), tuple(conf)+(self.target_grip,self.target_grip))
         simulate_for_duration(0.2)
+        print("gripper force", self.get_gripper_force())
 
     def squeeze(self, force):
-        for i in range(220):
-            left = np.linalg.norm(p.getJointState(self.pw.robot,9)[2][3:])
-            right = np.linalg.norm(p.getJointState(self.pw.robot,10)[2][3:])
-            curr_force = (left+right)/2 
+        force_history = deque(maxlen=2)
+        k=0.00054
+        kp = 0.00008# 0.00015
+        n_tries = 400
+        for i in range(n_tries):
+            curr_force = self.get_gripper_force()
+            print("curr force", curr_force)
             diff = force-curr_force
+            force_history.append(curr_force)
+            if len(force_history) == 2:
+                deriv_diff= force_history[1]-force_history[0]
+            else:
+                deriv_diff=0
             curr_pos = p.getJointState(self.pw.robot,9)[0]
-            k=0.0002
-            target = curr_pos - k*diff
+            target = curr_pos - (k*diff+kp*(deriv_diff))
             control_joints(self.pw.robot, self.finger_joints, (target,target))
-            simulate_for_duration(0.05)
-            if abs(diff) < 0.1:
+            self.target_grip = target
+            simulate_for_duration(0.1)
+            
+            if len(force_history) > 3 and abs(np.mean(force_history[-3:])-force) < 0.1:
+                import ipdb; ipdb.set_trace()
+                print("achieved at i= ", i)
                 break 
+        if n_tries == i-1:
+            print("Failure to reach", diff)
 
-        
+    def get_gripper_force(self):
+        left = np.linalg.norm(p.getJointState(self.pw.robot,9)[2][3:])
+        right = np.linalg.norm(p.getJointState(self.pw.robot,10)[2][3:])
+        curr_force = (left+right)/2 
+        return curr_force
+
         
     def go_to_pose(self,target_pose, obstacles=[], attachments=[]):
         for i in range(10):
@@ -78,7 +99,7 @@ class PipeGraspAgent():
                 for conf in motion_plan:
                     self.go_to_conf(conf)
                     if self.pipe_attach is not None:
-                        self.squeeze(force=1.8)
+                        self.squeeze(force=1.9)
             ee_loc = p.getLinkState(self.pw.robot, 8)[0]
             distance = np.linalg.norm(np.array(ee_loc)-target_pose[0])
             print("distance", distance)
@@ -90,6 +111,8 @@ class PipeGraspAgent():
 pga = PipeGraspAgent(visualize=True)
 pga.change_grip(0.025, force=0)
 pga.approach()
-pga.change_grip(0.005, force=1.8) # force control this. 1 was ok
+pga.change_grip(0.005, force=1.9) # force control this. 1 was ok
+import ipdb; ipdb.set_trace()
+simulate_for_duration(2.0)
 pga.place()
-pga.insert()
+#pga.insert()
