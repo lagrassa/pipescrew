@@ -1,5 +1,6 @@
 import pybullet as p
 from  pybullet_tools.utils import create_cylinder, set_point, set_pose, simulate_for_duration
+from make_pipe import make_cylinder
 
 
 """purely simulated world"""
@@ -26,7 +27,9 @@ class PipeWorld():
     def setup_workspace(self):
         self.floor = p.loadURDF("../models/short_floor.urdf")
         p.changeDynamics(self.floor, -1, mass=0)
-        self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
+        #self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
+        self.hollow = make_cylinder(12,1,3,0.1)
+        import ipdb; ipdb.set_trace()
         p.changeDynamics(self.hollow, -1, mass=0)
         set_pose(self.hollow, ((0.0,0,0.001),(0,0.5,0.5,0)))
         self.pipe = create_cylinder(0.01, 0.1, mass=1, color=(0, 0, 1, 1))
@@ -39,3 +42,4 @@ class PipeWorld():
 
 if __name__ == "__main__":
     pw = PipeWorld(visualize=True)
+    import ipdb; ipdb.set_trace()

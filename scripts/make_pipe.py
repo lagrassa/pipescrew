@@ -76,8 +76,8 @@ def make_cylinder(n, side_length, height, width):
                                   linkJointAxis=[[1,0,0] for _ in shape_indices])
 
 #verts = make_polygon(16, 1)
-p.connect(p.GUI)
-make_cylinder(12,1,3,0.1)
+#p.connect(p.GUI)
+#make_cylinder(12,1,3,0.1)
 
 
 #xs = [pt[0] for pt in verts]
