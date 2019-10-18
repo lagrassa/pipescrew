@@ -42,10 +42,6 @@ class NavEnv():
             obs.render(self.screen)
         pygame.display.flip()
 
-
-
-
-
 class Obstacle():
     def __init__(self, origin, w):
         self.origin = origin
