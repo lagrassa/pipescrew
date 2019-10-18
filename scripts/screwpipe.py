@@ -39,7 +39,7 @@ class PipeGraspAgent():
         
     def insert(self):
         target_quat = (1,0.5,0,0) #get whatever it is by default
-        grasp = np.array([0,0,0.22])
+        grasp = np.array([0,0,0.18])
         target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
         target_pose = (target_point, target_quat)
         self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach])
@@ -112,6 +112,7 @@ pga = PipeGraspAgent(visualize=True)
 pga.change_grip(0.025, force=0)
 pga.approach()
 pga.change_grip(0.005, force=0.7) # force control this. 1 was ok
-simulate_for_duration(2.0)
+simulate_for_duration(0.5)
 pga.place()
-#pga.insert()
+pga.insert()
+
