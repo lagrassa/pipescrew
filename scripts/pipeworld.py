@@ -1,4 +1,5 @@
 import pybullet as p
+import os
 from  pybullet_tools.utils import create_cylinder, set_point, set_pose, simulate_for_duration
 from make_pipe import make_cylinder
 
@@ -17,7 +18,7 @@ class PipeWorld():
     spawns a franka arm, eventually a FrankaArm object
     """
     def setup_robot(self):
-        self.robot = p.loadURDF("/usr0/home/alagrass/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
+        self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
         set_point(self.robot, (-0.4,0,0.005))
         p.changeDynamics(self.robot, -1, mass=0)
 
