@@ -1,7 +1,6 @@
 from __future__ import division
 import numpy as np
 import pybullet as p
-import matplotlib.pyplot as plt
 
 "returns list of vertices"
 def make_polygon(n, side_length):
@@ -59,7 +58,7 @@ def make_cylinder(n, side_length, height, width):
     parent_indices = [0]*len(shape_indices)
     assert(len(shape_indices)==len(link_orientations)==len(link_positions))
     #p.createMultiBody(linkCollisionShapeIndices=shape_indices, linkPositions=link_positions, linkOrientations=link_orientations)
-    sphereUid = p.createMultiBody(baseMass=0,
+    body = p.createMultiBody(baseMass=0,
                                   baseCollisionShapeIndex=-1,
                                   baseVisualShapeIndex=-1,
                                   basePosition=[0,0,0],
@@ -75,6 +74,7 @@ def make_cylinder(n, side_length, height, width):
                                   linkJointTypes=[p.JOINT_FIXED for _ in shape_indices], 
                                   linkJointAxis=[[1,0,0] for _ in shape_indices])
 
+    return body
 #verts = make_polygon(16, 1)
 #p.connect(p.GUI)
 #make_cylinder(12,1,3,0.1)
