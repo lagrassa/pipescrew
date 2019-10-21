@@ -106,6 +106,10 @@ class PipeGraspAgent():
             if distance < 1e-3:
                 break
 
+    def collect_trajs(self):
+        pass
+        #just do the same thing every time
+
 
 
 pga = PipeGraspAgent(visualize=True)
@@ -114,4 +118,5 @@ pga.approach()
 pga.change_grip(0.005, force=0.7) # force control this. 1 was ok
 simulate_for_duration(2.0)
 pga.place()
+p.saveBullet("place.bullet")
 #pga.insert()
