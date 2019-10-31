@@ -1,8 +1,9 @@
 from nav_env import NavEnv
+from history import History
 from simple_model import train_policy
 import numpy as np
 from motion_planners.rrt_connect import birrt
-ne = NavEnv()
+ne = NavEnv(slip=True)
 
 distance = lambda x,y: 1
 def sample():
@@ -28,12 +29,6 @@ def extend(last_config, s):
 
 def collision(pt):
     return ne.collision_fn(pt)
-
-class History():
-    def __init__(self):
-        self.starts = []
-        self.paths = []
-
 
 def interp(history, s0):
     old_xs = [pt[0] for pt in history.paths]

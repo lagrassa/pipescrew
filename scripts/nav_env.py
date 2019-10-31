@@ -7,7 +7,8 @@ They need to be boxes. Origin is the top right
 300x400 grid
 """
 class NavEnv():
-    def __init__(self):
+    def __init__(self, slip=False ):
+        self.slip=slip
         self.gridsize = [300,400]
         pygame.init()
         self.screen = pygame.display.set_mode(self.gridsize)
@@ -16,11 +17,17 @@ class NavEnv():
         self.goal = np.array((200,300))
         self.start = np.array((0,5))
         self.pos = self.start[:]
+        self._k1 = 1.2#
+        self._k2 = 0.2# another secret constant
         self.obstacles = [(Obstacle(np.array((20,20)),50))]
-
+    
     def step(self,x,y):
         old_pos = self.pos[:]
-        new_pos = np.array((x,y))+self.pos
+        move = np.array((x,y))
+        if self.slip:
+            new_pos = self._k1*(move)+self._k2*(move^2)
+        else:
+            new_pos = move + self.pos
         if not self.collision_fn(new_pos):
             self.pos = new_pos
         pygame.draw.line(self.screen,(1,0,0,1),old_pos.astype(np.int32),new_pos.astype(np.int32), 5)
@@ -38,9 +45,15 @@ class NavEnv():
 
 
     def render(self):
+        view_wid =10
+        start_rect = pygame.Rect(self.start[0], self.start[1], view_wid, view_wid)
+        goal_rect = pygame.Rect(self.goal[0],self.goal[1], view_wid, view_wid)
+        pygame.draw.rect(self.screen, (170,0,0,1),start_rect,0)
+        pygame.draw.rect(self.screen, (0,170,0,1),goal_rect,0)
         for obs in self.obstacles:
             obs.render(self.screen)
         pygame.display.flip()
+        import ipdb; ipdb.set_trace()
 
 class Obstacle():
     def __init__(self, origin, w):
