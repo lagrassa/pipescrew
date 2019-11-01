@@ -19,7 +19,7 @@ def extend(last_config, s):
     theta = np.arctan2(dy,dx)
     x_vec = np.linalg.norm([dx,dy])*np.cos(theta) 
     y_vec = np.linalg.norm([dx,dy])*np.sin(theta) 
-    vel = 1
+    vel = 2
     threshold = 5
     while(np.linalg.norm(curr_config-s) > threshold):
         curr_config[0] += vel*np.cos(theta)
@@ -53,17 +53,15 @@ for i in range(len(starts)):
     ne.pos = np.array(starts[i])
     start = np.array(starts[i]).copy()
     path = birrt(start, goal, distance, sample, extend, collision)
-    [ne.go_to(pt[0], pt[1]) for pt in path]
-    import ipdb; ipdb.set_trace()
+    for pt in path:
+        diff = (np.array(pt)-ne.pos)/ne.k1
+        ne.step(*diff)
     history.starts.append(start)
     history.paths.append(path)
 policy = train_policy(history)
-test_start = np.array((1,2)).reshape((1,2))
-current_state = test_start.copy()
 for i in range(300):
-    current_state = policy.predict(current_state)
-    ne.go_to(current_state[0][0],current_state[0][1])
-    print(current_state.round(2))
+    action = policy.predict(ne.pos)
+    ne.step(*action)
 import ipdb; ipdb.set_trace()
 
 

@@ -15,17 +15,21 @@ class NavEnv():
         self.screen.fill((255,255,255))
         pygame.display.flip()
         self.goal = np.array((200,300))
-        self.start = np.array((0,5))
+        self.start = np.array((0,5)) + 5*np.random.random((2,))
         self.pos = self.start[:]
-        self._k1 = 1.2#
-        self._k2 = 0.2# another secret constant
+        self.k1 = 1.3#
+        self.max_vel = 5
+        self._k2 = 0.45#0.5# another secret constant
         self.obstacles = [(Obstacle(np.array((20,20)),50))]
     
     def step(self,x,y):
         old_pos = self.pos[:]
         move = np.array((x,y))
+        #move cannot exceeed max vel
+        if np.linalg.norm(move) > self.max_vel:
+            move = (move / np.linalg.norm(move))*self.max_vel
         if self.slip:
-            new_pos = self._k1*(move)+self._k2*(move^2)
+            new_pos = self.pos + self.k1*(move)+self._k2*(move**2)
         else:
             new_pos = move + self.pos
         if not self.collision_fn(new_pos):
@@ -53,7 +57,6 @@ class NavEnv():
         for obs in self.obstacles:
             obs.render(self.screen)
         pygame.display.flip()
-        import ipdb; ipdb.set_trace()
 
 class Obstacle():
     def __init__(self, origin, w):
