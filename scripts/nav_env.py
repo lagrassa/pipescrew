@@ -7,7 +7,7 @@ They need to be boxes. Origin is the top right
 300x400 grid
 """
 class NavEnv():
-    def __init__(self, slip=False ):
+    def __init__(self, slip=True ):
         self.slip=slip
         self.gridsize = [300,400]
         pygame.init()
@@ -18,8 +18,10 @@ class NavEnv():
         self.start = np.array((0,5)) + 5*np.random.random((2,))
         self.pos = self.start[:]
         self.k1 = 1.3#
-        self.max_vel = 5
-        self._k2 = 0.45#0.5# another secret constant
+        self.pos_history = []
+        self.path_color = (1,0,0,1)
+        self.max_vel = 10
+        self._k2 = 0.4#0.5# another secret constant
         self.obstacles = [(Obstacle(np.array((20,20)),50))]
     
     def step(self,x,y):
@@ -29,12 +31,18 @@ class NavEnv():
         if np.linalg.norm(move) > self.max_vel:
             move = (move / np.linalg.norm(move))*self.max_vel
         if self.slip:
-            new_pos = self.pos + self.k1*(move)+self._k2*(move**2)
+            vp = 0.1
+            if len(self.pos_history) == 0:
+                vel = 0
+            else:
+                vel = move + self.pos - self.pos_history[-1]
+            new_pos = self.pos + self.k1*(move)+np.multiply(vp*vel,self._k2*(move**2))
         else:
             new_pos = move + self.pos
         if not self.collision_fn(new_pos):
             self.pos = new_pos
-        pygame.draw.line(self.screen,(1,0,0,1),old_pos.astype(np.int32),new_pos.astype(np.int32), 5)
+        self.pos_history.append(new_pos[:])
+        pygame.draw.line(self.screen,self.path_color,old_pos.astype(np.int32),new_pos.astype(np.int32), 5)
         self.render()
 
     def go_to(self, x,y):
