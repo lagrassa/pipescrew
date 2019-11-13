@@ -54,8 +54,9 @@ def extend(last_config, s):
     theta = np.arctan2(dy,dx)
     x_vec = np.linalg.norm([dx,dy])*np.cos(theta) 
     y_vec = np.linalg.norm([dx,dy])*np.sin(theta) 
-    vel = 2
-    threshold = 5
+    dt = 0.01
+    vel = 1*dt
+    threshold = 0.05
     while(np.linalg.norm(curr_config-s) > threshold):
         curr_config[0] += vel*np.cos(theta)
         curr_config[1] += vel*np.sin(theta)
@@ -63,7 +64,8 @@ def extend(last_config, s):
     return configs 
 
 def collision(pt):
-    return ne.collision_fn(pt)
+    ret =  ne.collision_fn(pt)
+    return ret
 
 def interp(history, s0):
     old_xs = [pt[0] for pt in history.paths]
@@ -86,19 +88,34 @@ def print_path_stats(path):
     print("max x diff", max_x_diff)
     print("may y diff", max_y_diff)
 
-start = ne.pos
+start = ne.start
 goal = ne.goal
-starts = [(0,3),(1,1),(2,4),(5,6),(4,6),(9,10)]
+starts = [(0.2,0.1),(0.4, 0.5)]
 history = History()
 thresh = 3
+timeout = 15
 for i in range(len(starts)):
-    ne.pos = np.array(starts[i])
-    start = np.array(starts[i]).copy()
+    #ne.agent.position = np.array(starts[i])
+    #ne.agent.start = np.array(starts[i])
+    start = np.array(ne.start).copy()
+    
     path = birrt(start, goal, distance, sample, extend, collision)
+    print("Found path")
+    ne.desired_pos_history=path
+    kp=100
+    kd=0
     for pt in path:
-        diff = (np.array(pt)-ne.pos)/ne.k1
-        ne.step(*diff)
-    print("Goal distance", np.linalg.norm(ne.pos-goal))
+        #xdd = 2*(pt-ne.get_pos()-ne.get_vel()*ne.dt)/(ne.dt**2) #inverse dynamics here
+        for _ in range(timeout):
+            traj_dist =  np.linalg.norm(ne.get_pos()-pt)
+            #print("traj dist", traj_dist)
+            if traj_dist < 0.01:
+                break
+            xdd =  kp*(pt-ne.get_pos())-kd*(ne.get_vel())
+            ne.step(*xdd)
+        if traj_dist > 0.1:
+            print("High traj dist at", traj_dist)
+    print("Goal distance", np.linalg.norm(ne.get_pos()-goal))
     print_path_stats(path)
 
     
@@ -114,7 +131,6 @@ print_path_stats(imitation_path)
 for pt in imitation_path:
     diff = (np.array(pt)-ne.pos)/ne.k1
     ne.step(*diff)
-import ipdb; ipdb.set_trace()
 
 #policy = train_policy(history)
 #for i in range(300):
