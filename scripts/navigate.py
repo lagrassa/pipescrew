@@ -55,7 +55,7 @@ def extend(last_config, s):
     x_vec = np.linalg.norm([dx,dy])*np.cos(theta) 
     y_vec = np.linalg.norm([dx,dy])*np.sin(theta) 
     dt = 0.01
-    vel = 1*dt
+    vel = 5*dt
     threshold = 0.05
     while(np.linalg.norm(curr_config-s) > threshold):
         curr_config[0] += vel*np.cos(theta)
@@ -102,7 +102,8 @@ for i in range(len(starts)):
     path = birrt(start, goal, distance, sample, extend, collision)
     print("Found path")
     ne.desired_pos_history=path
-    kp=100
+    kp=50
+    delay = 4
     kd=0
     for pt in path:
         #xdd = 2*(pt-ne.get_pos()-ne.get_vel()*ne.dt)/(ne.dt**2) #inverse dynamics here
@@ -112,10 +113,12 @@ for i in range(len(starts)):
             if traj_dist < 0.01:
                 break
             xdd =  kp*(pt-ne.get_pos())-kd*(ne.get_vel())
-            ne.step(*xdd)
+            for i in range(delay):
+                ne.step(*xdd)
         if traj_dist > 0.1:
             print("High traj dist at", traj_dist)
     print("Goal distance", np.linalg.norm(ne.get_pos()-goal))
+    import ipdb; ipdb.set_trace()
     print_path_stats(path)
 
     

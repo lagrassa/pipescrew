@@ -56,8 +56,8 @@ class NavEnv():
 
     def check_and_set_mu(self,dirty_bit = False):
         old_pos = np.array(self.agent.position.tuple)
-        no_ice_mu = 0.01
-        ice_mu = 0.02
+        no_ice_mu = 0.6
+        ice_mu = 0.0000002
         if old_pos[0] < self.ice_boundary_x:
             if self.mu != no_ice_mu:
                 self.mu = no_ice_mu
