@@ -3,7 +3,6 @@ from history import History
 from simple_model import train_policy
 import numpy as np
 from motion_planners.rrt_connect import birrt
-ne = NavEnv(slip=True)
 
 distance = lambda x,y: 1
 
@@ -12,15 +11,30 @@ def closest_pt_index(path, state):
     min_dist_pt = np.argmin(dists)
     return min_dist_pt
 
-def select_imitation_traj(state, history):
+def select_imitation_trajs(state, history):
     #which point is the closest distance 
     min_dists = []
+    best_k = 2
     for path in history.paths:
         min_dist_pt = closest_pt_index(path, state)
         min_dists.append(min_dist_pt)
-    best_path_idx = np.argmin(min_dists)
-    closest_pt_idx = closest_pt_index(history.paths[best_path_idx],state)
-    return history.paths[best_path_idx][closest_pt_idx:]
+    sorted_by_dist_idxs = np.argsort(min_dists)
+    closest_pt_idxs = [closest_pt_index(history.paths[sorted_by_dist_idx],state) for sorted_by_dist_idx in sorted_by_dist_idxs]
+    best_path_idxs = sorted_by_dist_idxs[:best_k]
+    best_paths = [np.vstack(history.paths[dist_idx][pt_idx:]) for dist_idx, pt_idx in zip(best_path_idxs, closest_pt_idxs)]
+    #pad them
+    longest_path = max(best_paths, key=lambda x: x.shape[0]).shape[0]
+    trajs = np.zeros((len(best_paths),)+(2,longest_path) )
+    for i in range(len(best_paths)):
+        path = best_paths[i]
+        diff = longest_path-path.shape[0]
+        if diff != 0:
+            padding = np.ones((diff,2))*path[-1]
+            best_paths[i] = np.vstack([path,padding])
+        
+        trajs[i,:] = best_paths[i].T
+    return trajs
+    
 
 
 def moving_average(a, n=5) :
@@ -29,15 +43,19 @@ def moving_average(a, n=5) :
     return ret[n - 1:] / n
 
 
-def imitate_history(history, state):
+def imitate_history(history, state, goal):
     import pydmps
     #find trajectory with the closest state to this one, form a DMP starting from that state to imitate it
     dmp = pydmps.dmp_discrete.DMPs_discrete(n_dmps=2, n_bfs=20, ay=np.ones(2)*25.0, dt =1/186.)
-    imitation_traj = select_imitation_traj(state, history)
-    imitation_traj = np.vstack([moving_average(np.array(imitation_traj)[:,i] ) for i in range(0,2)])
-    y_des = imitation_traj
+    imitation_trajs = select_imitation_trajs(state, history)
+    #imitation_traj = np.vstack([moving_average(np.array(imitation_traj)[:,i] ) for i in range(0,2)])
+    y_des = imitation_trajs
     
     dmp.imitate_path(y_des=y_des, plot=False)
+    import ipdb; ipdb.set_trace()
+    y0 = state
+    goal = goal 
+    dmp.reset_state(goal=goal, y0=y0)
     y_track, dy_track, ddy_track = dmp.rollout(timesteps=210)
     return y_track
 
@@ -88,23 +106,15 @@ def print_path_stats(path):
     print("max x diff", max_x_diff)
     print("may y diff", max_y_diff)
 
-start = ne.start
-goal = ne.goal
 starts = [(0.2,0.1),(0.4, 0.5)]
 history = History()
 thresh = 3
 timeout = 15
-for i in range(len(starts)):
-    #ne.agent.position = np.array(starts[i])
-    #ne.agent.start = np.array(starts[i])
-    start = np.array(ne.start).copy()
-    
-    path = birrt(start, goal, distance, sample, extend, collision)
-    print("Found path")
-    ne.desired_pos_history=path
-    kp=50
-    delay = 4
-    kd=0
+
+def follow_path(ne, path):
+    kp=5#50
+    delay = 3
+    kd=0.4
     for pt in path:
         #xdd = 2*(pt-ne.get_pos()-ne.get_vel()*ne.dt)/(ne.dt**2) #inverse dynamics here
         for _ in range(timeout):
@@ -118,26 +128,33 @@ for i in range(len(starts)):
         if traj_dist > 0.1:
             print("High traj dist at", traj_dist)
     print("Goal distance", np.linalg.norm(ne.get_pos()-goal))
-    import ipdb; ipdb.set_trace()
+
+for i in range(len(starts)):
+    #ne.agent.position = np.array(starts[i])
+    #ne.agent.start = np.array(starts[i])
+    start = np.array(starts[i])
+    goal = np.array((1,0.67) )
+    ne = NavEnv(start,goal, slip=False)
+    path = birrt(start, goal, distance, sample, extend, collision)
+    print("Found path")
+    ne.desired_pos_history=path
+    follow_path(ne,path)
     print_path_stats(path)
 
     
-    if np.linalg.norm(ne.pos-goal) < thresh:
+    if np.linalg.norm(ne.get_pos()-goal) < thresh:
         print("Found one close enough to add")
         history.starts.append(start)
         history.paths.append(path)
-
-ne.pos = np.array(starts[i])
+start = np.array((0.2,0.1))
+goal = np.array((1,0.67))
+ne = NavEnv(start, goal, slip=False)
 ne.path_color = (190,0,0,1)
-imitation_path = imitate_history(history, ne.pos)
+imitation_path = imitate_history(history, ne.get_pos(), goal)
+ne.plot_path(imitation_path)
 print_path_stats(imitation_path)
-for pt in imitation_path:
-    diff = (np.array(pt)-ne.pos)/ne.k1
-    ne.step(*diff)
+import ipdb; ipdb.set_trace()
+follow_path(ne, path)
 
-#policy = train_policy(history)
-#for i in range(300):
-#    action = policy.predict(ne.pos)
-#    ne.step(*action)
 
 
