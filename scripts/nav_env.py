@@ -1,6 +1,7 @@
 import pygame
 import numpy as np
 from Box2D import *
+
 #convert to Box2D
 
 """
@@ -9,7 +10,7 @@ They need to be boxes. Origin is the top right
 300x400 grid
 """
 class NavEnv():
-    def __init__(self, slip=True ):
+    def __init__(self, start,goal,slip=True ):
         self.slip=slip
         self.gridsize = np.array([300,400])
         self.m = 1
@@ -21,13 +22,13 @@ class NavEnv():
         self.screen = pygame.display.set_mode(self.gridsize)
         self.screen.fill((255,255,255))
         pygame.display.flip()
-        self.goal = np.array((200,300))*1/self.ppm
-        self.start = np.array((0,0.05)) + 0.05*np.random.random((2,))
+        self.goal = goal
+        self.start = start 
         self.world = b2World(gravity=(0,0), doSleep=True)
         self.agent = self.world.CreateDynamicBody(
             position=self.start,
             fixtures=b2FixtureDef(
-                shape=b2PolygonShape(box=(3, 3))
+                shape=b2PolygonShape(box=(0.03, 0.03))
             )
         )
         self.ground = self.world.CreateStaticBody(
@@ -45,6 +46,12 @@ class NavEnv():
                            Obstacle(np.array((length+gap,dist_down)),length,thickness),
                            Obstacle(np.array((2*length+2*gap,dist_down)),length,thickness),
         ]
+        for obstacle in self.obstacles:
+            self.world.CreateStaticBody(
+            position=obstacle.origin,
+            shapes=b2PolygonShape(box=(obstacle.x/2., obstacle.y/2.))
+        )
+            
         self.dt = 0.01
         self.render()
 
@@ -57,7 +64,7 @@ class NavEnv():
     def check_and_set_mu(self,dirty_bit = False):
         old_pos = np.array(self.agent.position.tuple)
         no_ice_mu = 0.6
-        ice_mu = 0.0000002
+        ice_mu = 0.02
         if old_pos[0] < self.ice_boundary_x:
             if self.mu != no_ice_mu:
                 self.mu = no_ice_mu
@@ -82,9 +89,13 @@ class NavEnv():
         self.agent.ApplyForceToCenter(force=move,wake = True) 
         self.world.Step(self.dt, 6, 2)
         new_pos = np.array(self.agent.position.tuple)
-        print("new pos", new_pos)
         self.world.ClearForces()
         self.render()
+    def plot_path(self,path):
+        pygame.draw.lines(self.screen, (0,0,255),False,self.ppm*path, 6)
+        self.render()
+
+
 
     def render(self):
         view_wid =10
