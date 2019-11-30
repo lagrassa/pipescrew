@@ -49,6 +49,7 @@ class PipeAgent:
             env.restore_state()
             
         self.history.paths = pad_paths(self.history.paths) #put it in a nicer form
+        env.close()
     ''' list of pipe sequences'''
     def plan_path(self, env, start, goal):
         """

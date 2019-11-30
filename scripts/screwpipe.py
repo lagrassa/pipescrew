@@ -223,7 +223,8 @@ class PipeGraspEnv():
 
     def train_policy_with_trajs(self):
         self.policy = train_policy(self.history) 
-
+    def close(self):
+        p.disconnect()
         
          
     def do_setup(self):

@@ -64,8 +64,10 @@ def test_cluster_one_pipe_simple():
     agent.collect_planning_history()
     #TODO after this synthesize planning history
     agent.cluster_planning_history(k=1) #here the agent clusters trajectories to put them in the DMP
-    pge = PipeGraspEnv(shift=0.001)
-    imitation_path = agent.dmp_plan(pge.get_pos(), None)
+    import ipdb; ipdb.set_trace()
+    pge = PipeGraspEnv(visualize=True)
+    goal = np.array([0,0,0.1])
+    imitation_path = agent.dmp_plan(pge.get_pos(), goal)
     agent.follow_path(pge, imitation_path)
     assert(pge.is_pipe_in_hole())
 
