@@ -1,5 +1,7 @@
 from nav_env import NavEnv
+from screwpipe import PipeGraspEnv
 from agent import Agent
+from pipe_agent import PipeAgent
 import numpy as np
 
 GOAL_THRESHOLD = 0.08
@@ -43,5 +45,29 @@ def test_cluster_two_simple():
     print("goal distance", np.linalg.norm(ne.get_pos()-goal))
     assert(np.linalg.norm(ne.get_pos()-goal) < GOAL_THRESHOLD)
 
-test_cluster_one_simple()
+def test_cluster_many():
+    agent = Agent(show_training=True)
+    n_starts = 5
+    goal = np.array((1.05,1.15))
+    agent.collect_planning_history(starts = np.random.uniform(size=(n_starts, 2), low = 0, high = 0.7), goals = (goal,))
+    #TODO after this synthesize planning history
+    agent.cluster_planning_history(k=7) #here the agent clusters trajectories to put them in the DMP
+    ne = NavEnv(start=np.array((0.05, 0.06)), goal = goal)
+    imitation_path = agent.dmp_plan(ne.get_pos(), goal)
+    ne.plot_path(imitation_path)
+    agent.follow_path(ne, imitation_path)
+    print("goal distance", np.linalg.norm(ne.get_pos()-goal))
+    assert(np.linalg.norm(ne.get_pos()-goal) < GOAL_THRESHOLD)
+
+def test_cluster_one_pipe_simple():
+    agent = PipeAgent()
+    agent.collect_planning_history()
+    #TODO after this synthesize planning history
+    agent.cluster_planning_history(k=1) #here the agent clusters trajectories to put them in the DMP
+    pge = PipeGraspEnv(shift=0.001)
+    imitation_path = agent.dmp_plan(pge.get_pos(), None)
+    agent.follow_path(pge, imitation_path)
+    assert(pge.is_pipe_in_hole())
+
+test_cluster_one_pipe_simple()
 

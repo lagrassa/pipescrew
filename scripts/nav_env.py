@@ -10,29 +10,26 @@ They need to be boxes. Origin is the top right
 300x400 grid
 """
 class NavEnv():
-    def __init__(self, start,goal,slip=True ):
+    def __init__(self, start,goal,slip=True , visualize=True):
         self.slip=slip
         self.gridsize = np.array([300,400])
         self.m = 1
+        self.steps_taken = 0
         self.mu = -1
         self.ppm = 200.
         self.joint = None
         self.ice_boundary_x = 150./self.ppm
-        pygame.init()
-        self.screen = pygame.display.set_mode(self.gridsize)
-        self.screen.fill((255,255,255))
-        pygame.display.flip()
         self.goal = goal
         self.start = start 
         self.world = b2World(gravity=(0,0), doSleep=True)
         self.agent = self.world.CreateDynamicBody(
             position=self.start,
             fixtures=b2FixtureDef(
-                shape=b2PolygonShape(box=(0.03, 0.03))
+                shape=b2PolygonShape(box=(0.02, 0.02)),
             )
         )
         self.ground = self.world.CreateStaticBody(
-            shapes=b2PolygonShape(box=(self.gridsize[0]/self.ppm, self.gridsize[1]/self.ppm))
+            shapes=create_box2d_box(self.gridsize[1]/self.ppm, self.gridsize[0]/self.ppm)        
         )
         self.check_and_set_mu(dirty_bit = True)
         self.pos_history = []
@@ -49,11 +46,17 @@ class NavEnv():
         for obstacle in self.obstacles:
             self.world.CreateStaticBody(
             position=obstacle.origin,
-            shapes=b2PolygonShape(box=(obstacle.x/2., obstacle.y/2.))
+            shapes=create_box2d_box(obstacle.y, obstacle.x)
         )
             
         self.dt = 0.01
-        self.render()
+        self.visualize = visualize
+        if self.visualize:
+            pygame.init()
+            self.screen = pygame.display.set_mode(self.gridsize)
+            self.screen.fill((255,255,255))
+            pygame.display.flip()
+            self.render()
 
     def get_pos(self):
         return np.array(self.agent.position.tuple)
@@ -90,7 +93,9 @@ class NavEnv():
         self.world.Step(self.dt, 6, 2)
         new_pos = np.array(self.agent.position.tuple)
         self.world.ClearForces()
-        self.render()
+        self.steps_taken +=1
+        if self.visualize:
+            self.render()
     def plot_path(self,path):
         pygame.draw.lines(self.screen, (0,0,255),False,self.ppm*path, 6)
         self.render()
@@ -113,7 +118,7 @@ class NavEnv():
         pygame.display.flip()
 
     def collision_fn(self, pt):
-        ret =  np.array([obs.in_collision(pt) for obs in self.obstacles]).any() or (pt > self.gridsize/self.ppm).any()
+        ret =  np.array([obs.in_collision(pt) for obs in self.obstacles]).any() or (pt > self.gridsize/self.ppm).any() or (pt < 0).any()
         return ret
 
 class Obstacle():
@@ -129,6 +134,9 @@ class Obstacle():
         if (pt > self.origin).all() and (pt < self.origin + np.array((self.x, self.y))).all():
             return True
         return False
+
+def create_box2d_box(h, w):
+    return b2PolygonShape(vertices = [(0,0), (0,-h/2), (-h/2., w/2.),(w/2.,0), (0,0)] )
 
 if __name__ == "__main__":
     ne = NavEnv() 

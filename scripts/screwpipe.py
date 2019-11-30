@@ -1,16 +1,18 @@
 from pipeworld import PipeWorld
-from simple_model import train_policy
 from history import History
 from collections import deque
 import pybullet as p
 import numpy as np
 from pybullet_tools.utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
-class PipeGraspAgent():
-    def __init__(self, visualize=True, bullet=None):
+class PipeGraspEnv():
+    def __init__(self, visualize=True, bullet=None, shift=0):
         self.pw = PipeWorld(visualize=visualize, bullet=bullet)
         self.pipe_attach=None
         self.target_grip = 0.015
         self.default_width=0.010
+        self.total_timeout = 3
+        self.steps_taken = 0
+        self.dt_pose = 0.1
         if self.pw.handonly:
             self.ee_link=-1
             self.finger_joints =(0,1)
@@ -23,6 +25,8 @@ class PipeGraspAgent():
             p.enableJointForceTorqueSensor(self.pw.robot, 9)
             p.enableJointForceTorqueSensor(self.pw.robot, 10)
             next(joint_controller(self.pw.robot, self.joints, [ 0.    ,  0.    , -1.5708,  0.    ,  1.8675,  0.    , 0   ]))
+        self.do_setup()
+        self.pw.shift_t_joint(shift,0)
 
 
     def approach(self):
@@ -38,14 +42,15 @@ class PipeGraspAgent():
         self.go_to_pose(target_pose, obstacles=obstacles)
         self.pipe_attach = create_attachment(self.pw.robot, self.ee_link, self.pw.pipe)
         self.squeeze(0,width = self.default_width)
-        
+    def collision_fn(self, pt):
+        return False #TODO make this actually check collision        
     def place(self, use_policy=False):
         grasp = np.array([0,0,0.3])
         target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
+        self.hollow_pose = get_pose(self.pw.hollow)
         target_quat = (1,0.5,0,0)
         target_pose = (target_point, target_quat)
         lift_point = np.array(p.getLinkState(self.pw.robot, self.finger_joints[0])[0])+grasp
-        import ipdb; ipdb.set_trace()
         traj1 = self.go_to_pose((lift_point, target_quat), obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
         traj2 = self.go_to_pose(target_pose, obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
         return traj1+traj2
@@ -53,11 +58,9 @@ class PipeGraspAgent():
     def insert(self, use_policy=False):
         target_quat = (1,0.5,0,0) #get whatever it is by default
         grasp = np.array([0,0,0.18])
-        target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
+        target_point = np.array(self.hollow_pose)[0]+grasp
         target_pose = (target_point, target_quat)
-        traj = self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach], use_policy=use_policy, cart_traj=True)
-        #traj = self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach], use_policy=use_policy, cart_traj=True)
-        traj = self.go_to_pose_impedance(target_pose)
+        traj = self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach], use_policy=use_policy, maxForce = 40,cart_traj=True)
         return traj
 
     def change_grip(self,num, force=0):
@@ -71,6 +74,7 @@ class PipeGraspAgent():
     def go_to_conf(self, conf):
         control_joints(self.pw.robot, get_movable_joints(self.pw.robot)+list(self.finger_joints), tuple(conf)+(self.target_grip,self.target_grip))
         simulate_for_duration(0.2)
+        self.steps_taken += 0.2
 
     def squeeze(self, force, width=None):
         self.squeeze_force = force
@@ -97,9 +101,15 @@ class PipeGraspAgent():
             self.target_grip = target
             if width is not None:
                 simulate_for_duration(0.5)
+                self.pw.steps_taken += 0.5 
+                if self.pw.steps_taken >= self.total_timeout:
+                    return
                 break
             else:
                 simulate_for_duration(0.1) #less sure of it
+                self.pw.steps_taken += 0.1 
+                if self.pw.steps_taken >= self.total_timeout:
+                    return
 
             
             if len(diffs) > 3 and abs(diff) < tol and abs(np.mean(list(diffs)[-3:])-force) < tol:
@@ -113,31 +123,20 @@ class PipeGraspAgent():
         right = np.linalg.norm(p.getJointState(self.pw.robot,self.finger_joints[1])[2][3:])
         curr_force = (left+right)/2 
         return curr_force
+    
+    def get_pos(self): 
+        return np.array(p.getBasePositionAndOrientation(self.pw.pipe)[0])
 
-    def go_to_pose_impedance(self, target_pose):
-        #xdd = 
-        K = np.eye(3)
-        movable_joints = get_movable_joints(self.pw.robot)
-        #q = get_joint_positions(self.pw.robot, movable_joints)
-        #qdot = get_joint_velocities(self.pw.robot, movable_joints)
-        #inertial_matrix = p.calculateMassMatrix(self.pw.robot, q) 
-        joint_index = 8
-        #jacobian = p.calculateJacobian(self.pw.robot, joint_index, [0,0,0], 
-        #inertial_task_space_matrix = np.dot(jacobian, inertial_matrix)
-        #pos_error = target_state - p.getLinkState(joint_index)[0]
-        F = np.dot(K, pos_error)#+np.dot(inertial_task_space_matrix,xdd)
-        #force in task space, inverse kinematics to get the torques
-        #torques to do that
-        torque = bullet.calculateInverseDynamics(id_robot, obj_pos, obj_vel, obj_acc)
-        return p.setJointMotorControlArray(body, joints, p.TORQUE_CONTROL,
-                                   forces = torque)
-        
-    def go_to_pose(self,target_pose, obstacles=[], attachments=[], cart_traj=False, use_policy = False):
+    def go_to_pose(self,target_pose, obstacles=[], attachments=[], cart_traj=False, use_policy = False, maxForce = 100):
         total_traj = []
         if self.pw.handonly:
-            p.changeConstraint(self.pw.cid, target_pose[0], target_pose[1], maxForce = 100)
+            p.changeConstraint(self.pw.cid, target_pose[0], target_pose[1], maxForce = maxForce)
             for i in range(50):
-                simulate_for_duration(0.1)
+                simulate_for_duration(self.dt_pose)
+                self.pw.steps_taken += self.dt_pose 
+                if self.pw.steps_taken >= self.total_timeout:
+                    return total_traj
+
                 ee_loc = p.getBasePositionAndOrientation(self.pw.robot)[0]
                 distance = np.linalg.norm(np.array(ee_loc)-target_pose[0])
                 if distance < 1e-3:
@@ -183,25 +182,44 @@ class PipeGraspAgent():
         return total_traj
 
     def is_pipe_in_hole(self):
+        pose_hollow, _ = p.getBasePositionAndOrientation(self.pw.hollow)
+        pose_pipe, _ = p.getBasePositionAndOrientation(self.pw.pipe)
+        xy_dist = np.linalg.norm(np.array(pose_pipe)[0:2]-np.array(pose_hollow)[0:2])
+        z_dist = np.linalg.norm(pose_pipe[2]-pose_hollow[2])
+        xy_threshold = 0.008
+        z_threshold = 0.064
+        if xy_dist < xy_threshold and z_dist < z_threshold:
+            return True
         return False
+    def restore_state(self):
+        p.restoreState(self.bullet_id)
 
+    def save_state(self):
+        self.bullet_id = p.saveState()
     def collect_trajs(self):
         trajs = []
-        successes = []
-        self.do_setup()
-        bullet_id = p.saveState()
         self.history = History()
-        for i in range(2):
-            p.restoreState(bullet_id)
-            if i == 0:
-                traj = self.insert()
-            else:
-                import ipdb; ipdb.set_trace()
-                traj = self.insert(use_policy=True)
-            successes.append(self.is_pipe_in_hole()) 
-            trajs.append(traj)
-            self.history.paths = trajs
-            self.train_policy_with_trajs()
+        shifts = np.linspace(0, 0.02, 30)
+        num_trials = 20
+
+        for n in range(num_trials):
+            print("Trial #", n)
+            rewards = []
+            for i in shifts:
+                self.restore_state()
+                self.pw.steps_taken=0
+                self.pw.shift_t_joint(i,0)
+                if i == 0:
+                    traj = self.insert()
+                else:
+                    traj = self.insert(use_policy=False)
+                rewards.append(self.is_pipe_in_hole()) 
+                trajs.append(traj)
+                self.history.paths = trajs
+            self.history.rewards.append(rewards)
+        np.save("rewards_40.npy", np.array(self.history.rewards))
+        np.save("shifts_40.npy", shifts)
+            #self.train_policy_with_trajs()
 
     def train_policy_with_trajs(self):
         self.policy = train_policy(self.history) 
@@ -211,13 +229,13 @@ class PipeGraspAgent():
     def do_setup(self):
         self.change_grip(0.025, force=0)
         self.approach()
-        self.change_grip(0.005, force=0.7) # force control this. 1 was ok
+        self.change_grip(0.005, force=0.8) # force control this. 1 was ok
         simulate_for_duration(0.1)
         self.place()
+        self.save_state()
 
 
-
-pga = PipeGraspAgent(visualize=True, bullet="place.bullet")
-pga.collect_trajs()
-pga.train_policy_with_trajs()
+if __name__ == "__main__":
+    pga = PipeGraspEnv(visualize=True, bullet="place.bullet")
+    pga.collect_trajs()
 #pga.insert()
