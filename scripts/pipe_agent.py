@@ -25,17 +25,16 @@ class PipeAgent:
             target_point = pt +self.grasp
             pe.go_to_pose((target_point, target_quat), attachments = [pe.pipe_attach], maxForce = 100, cart_traj = True)
 
-    def collect_planning_history(self, starts=None, goals = None):
-        shifts = (0, 0.001, 0.01)#, (0.21, 0.11)]
+    def collect_planning_history(self, starts=None, goals = None, N =5):
         thresh = 0.08
         target_quat = (1,0.5,0,0) #get whatever it is by default
-
+        vels = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
         env = PipeGraspEnv(visualize=False, shift=0)
-        for i in range(len(shifts)):
+        for vel,_ in zip(vels, range(N)):
             start = env.get_pos()
             goal = np.array([0,0,0.1])
-            path = self.plan_path(env,start, goal)
+            path = self.plan_path(env,start, goal, vel)
             if path is None:
                 print("No path found")
             else:
@@ -51,7 +50,7 @@ class PipeAgent:
         self.history.paths = pad_paths(self.history.paths) #put it in a nicer form
         env.close()
     ''' list of pipe sequences'''
-    def plan_path(self, env, start, goal):
+    def plan_path(self, env, start, goal, vel=0.1):
         """
 
         :rtype: np.array
@@ -62,10 +61,12 @@ class PipeAgent:
             configs = [last_config.copy()]
             curr_config = last_config.copy().astype(np.float32)
             dt = env.dt_pose
-            vel = 0.1
             diff =  np.linalg.norm(last_config-s)
             diff_comp =  s-last_config
-            num_steps_req = int(np.ceil(diff/(vel*dt)))
+            try:
+                num_steps_req = int(np.ceil(diff/(vel*dt)))
+            except:
+                import ipdb; ipdb.set_trace()
             for i in range(num_steps_req):
                 curr_config[:] += diff_comp*dt
                 configs.append(curr_config.copy())
@@ -137,7 +138,7 @@ def pad_paths(paths):
         path = paths[i]
         diff = longest_path - path.shape[0]
         if diff != 0:
-            padding = np.ones((diff, 2)) * path[-1]
+            padding = np.ones((diff, path.shape[-1])) * path[-1]
             paths[i] = np.vstack([path, padding])
 
         trajs[i, :] = paths[i]
