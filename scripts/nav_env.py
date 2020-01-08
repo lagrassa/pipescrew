@@ -81,7 +81,7 @@ class NavEnv():
             dirty_bit = True
         if dirty_bit:
             if self.joint is not None:
-                self.world.DestroyJoint(self.joint) 
+                self.world.DestroyJoint(self.joint)
             self.joint = self.world.CreateFrictionJoint(bodyA = self.agent, bodyB = self.ground,maxForce = self.m*self.mu )
 
     '''
@@ -102,12 +102,14 @@ class NavEnv():
         if self.visualize:
             self.render()
     def plot_path(self,path):
+        self.render(flip=False)
         pygame.draw.lines(self.screen, (0,0,255),False,self.ppm*path, 6)
-        self.render()
+        pygame.display.flip()
+
     def goal_condition_met(self):
         return np.linalg.norm(self.get_pos()-self.goal) < 0.02
 
-    def render(self):
+    def render(self, flip = True):
         view_wid =10
         #draw green for normal, light blue for the ice
         green_rect = pygame.Rect(0, 0, self.gridsize[0], self.ice_boundary_x*self.ppm)
@@ -126,7 +128,8 @@ class NavEnv():
         for i in range(len(self.desired_pos_history)-1):
             pygame.draw.line(self.screen,(0,100,0,1),(self.ppm*self.desired_pos_history[i]).astype(np.int32),(self.ppm*self.desired_pos_history[i+1]).astype(np.int32), 2)
         #if np.random.randint(2) == 2:
-        pygame.display.flip()
+        if flip:
+            pygame.display.flip()
 
     def collision_fn(self, pt):
         ret =  np.array([obs.in_collision(pt) for obs in self.obstacles]).any() or (pt > self.gridsize/self.ppm).any() or (pt < 0).any()

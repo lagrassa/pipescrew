@@ -1,3 +1,5 @@
+from numpy.core._multiarray_umath import ndarray
+
 from history import History
 from scipy.stats import multivariate_normal as mvn
 from belief import Belief
@@ -6,6 +8,11 @@ import numpy as np
 from nav_env import NavEnv
 from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
+from scipy.integrate import solve_ivp
+from rmpflow.rmp import RMPRoot
+from rmpflow.rmp_leaf import CollisionAvoidance, GoalAttractorUni
+
+
 """
 Can make decisions based on a nav_env
 """
@@ -19,6 +26,7 @@ class Agent:
         self.goal_threshold = 0.02
         self.max_xdot = 2
         self.guapo_eps = 0.9
+        self.rmp = None
         self.cluster_planning_history = self.dmp_cluster_planning_history
     def follow_path(self, ne, path, force=None):
         kp = 10  # 50
@@ -44,13 +52,13 @@ class Agent:
         for i in range(N):
             start = np.random.uniform(size=2, low=0, high= 0.7)
             goal = np.array((1,0.67))
-            dmp_traj, best_idx = self.dmp_plan(start, goal, ret_cluster = True)
+            dmp_traj, best_idx = self.dmp_plan(start, goal, ret_cluster = True)  # type: (object, ndarray[int])
             ne = NavEnv(start, goal, slip=False, visualize =self.show_training)
             self.follow_path(ne,dmp_traj)
             #print("Goal dist", np.linalg.norm(ne.get_pos()-goal))
             result = -np.sign(np.linalg.norm(ne.get_pos()-goal))
             self.do_rl_on_cluster(self.dmp_traj_clusters[best_idx], result)
-            
+
 
     def do_rl_on_cluster(self, cluster, result):
         cluster.reps_update_dmp(result, explore=True)
@@ -183,17 +191,40 @@ class Agent:
     """
     def policy(self,ne,pos):
         width = 0.11
-        p_in_s_uncertain = self.in_s_uncertain.cdf(pos+width)-self.in_s_uncertain.cdf(pos-width)
+        p_in_s_uncertain = self.belief.in_s_uncertain.cdf(pos+width)-self.belief.in_s_uncertain.cdf(pos-width)
         if p_in_s_uncertain > self.guapo_eps:
             return self.model_free_policy(pos, ne)
         else:
             return self.model_based_policy(pos, ne)
 
+    def model_based_trajectory(self, s, ne, nsteps = 10):
+        centroid =self.belief.in_s_uncertain.mean
+        if self.rmp is None:
+            r = RMPRoot("root")
+            x_g = centroid
+            #leaf1 = CollisionAvoidance("collision_avoidance", r, None,epsilon=0.2 )
+            leaf2 = GoalAttractorUni("goal_attractor",r, x_g)
+
+            def dynamics(t, state):
+                state = state.reshape(2, -1)
+                x = state[0]
+                x_dot = state[1]
+                x_ddot = r.solve(x, x_dot)
+                state_dot = np.concatenate((x_dot, x_ddot), axis=None)
+                return state_dot
+            self.dynamics = dynamics
+
+        sol = solve_ivp(self.dynamics, [0.001, nsteps], s)
+        import ipdb; ipdb.set_trace()
+        return sol.y[0:2, :]
+
     """
     get into s_hat_uncertain of ne, just the nearest centroids of the gaussians if you're going to do that
     """
-    def model_based_policy(self,s, ne):
-        return mvn(mean=[0,0], cov=0.1)
+    def model_based_policy(self,s, ne, nsteps = 10):
+        trajectory = self.model_based_trajectory(s, ne, nsteps=nsteps)
+        #find corresponding point and go to it
+        return mvn(mean=trajectory[-1], cov=0.001)
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
@@ -208,12 +239,12 @@ class Agent:
     """
     def achieve_goal(self, ne,goal, obstacle_prior, N = 1):
         #are we in s_hat_uncertain?
-        pos = ne.get_pos()
-        self.in_s_uncertain = obstacle_prior
+        state = np.concatenate([ne.get_pos(),ne.get_vel()])
+        self.belief.in_s_uncertain = obstacle_prior
         actions = []
         states = []
         for i in range(N):
-            action = self.policy(ne,pos).rvs()
+            action = self.policy(ne,state).rvs()
             state = ne.step(*action)
             actions.append(action)
             states.append(state)

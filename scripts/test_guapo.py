@@ -19,11 +19,27 @@ def test_achieve_goal():
     ne = NavEnv(start=np.array((0.1, 0.1)), goal = goal, obstacles = obstacles)
     ne.render()
     cov = 0.001
-    mean = [obstacles[0].x, obstacles[0].y]
-    obs_prior = mvn(mean=mean, cov= cov) # prior on the center of the line in xy space
-    states, actions = agent.achieve_goal(ne,goal,obs_prior, N = 10)
 
-test_achieve_goal()
+    obs_center = [obstacles[0].origin[0]+obstacles[0].x/2.0, obstacles[0].origin[1]]
+    obs_prior = mvn(mean=obs_center, cov= cov) # prior on the center of the line in xy space
+    states, actions = agent.achieve_goal(ne,goal,obs_prior, N = 10)
+def test_model_based_traj():
+    agent = Agent(show_training = True)
+    goal = np.array((0.4,0.5))
+    obstacles = line_world_obstacles(goal)
+    cov = 0.001
+    obs_center = [obstacles[0].origin[0]+obstacles[0].x/2.0, obstacles[0].origin[1]]
+    obs_prior = mvn(mean=obs_center, cov= cov) # prior on the center of the line in xy space
+    agent.belief.in_s_uncertain = obs_prior
+    ne = NavEnv(start=np.array((0.1, 0.1)), goal = goal, obstacles = obstacles)
+    nsteps = 40
+    s0 = np.concatenate([ne.get_pos(), ne.get_vel()])
+    mb_xs = agent.model_based_trajectory(s0, ne,nsteps=nsteps)
+    ne.plot_path(mb_xs.T)
+
+test_model_based_traj()
+
+
 
 
 
