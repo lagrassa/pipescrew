@@ -1,4 +1,5 @@
 import pygame
+from obstacle import line_world_obstacles, Obstacle, two_openings_obstacles, Quicksand
 import numpy as np
 from Box2D import *
 
@@ -12,7 +13,7 @@ They need to be boxes. Origin is the top right
 LIGHT_GREEN=(172, 255, 192)
 LIGHT_BLUE = (158,242,254)
 class NavEnv():
-    def __init__(self, start,goal,slip=True , visualize=True, shift=None):
+    def __init__(self, start,goal,slip=True , visualize=True, shift=None, obstacles = two_openings_obstacles()):
         self.slip=slip
         self.gridsize = np.array([300,400])
         self.m = 1
@@ -38,15 +39,7 @@ class NavEnv():
         self.pos_history = []
         self.desired_pos_history=[]
         self.path_color = (1,0,0,1)
-        gap = 35/self.ppm
-        length = 80/self.ppm
-        dist_down=150/self.ppm
-        print("dist_down", dist_down)
-        thickness  = 20/self.ppm
-        self.obstacles = [Obstacle(np.array((.001,dist_down)),length,thickness),
-                           Obstacle(np.array((length+gap,dist_down)),length,thickness),
-                           Obstacle(np.array((2*length+2*gap,dist_down)),length,thickness),
-        ]
+        self.obstacles = obstacles
         for obstacle in self.obstacles:
             self.world.CreateStaticBody(
             position=obstacle.origin,
@@ -117,8 +110,8 @@ class NavEnv():
     def render(self):
         view_wid =10
         #draw green for normal, light blue for the ice
-        green_rect = pygame.Rect(0, 0, self.ppm*self.gridsize[0], self.ice_boundary_x*self.ppm)
-        ice_rect = pygame.Rect(0,self.ice_boundary_x*self.ppm, self.ppm*self.gridsize[0],self.ppm*self.gridsize[1] )
+        green_rect = pygame.Rect(0, 0, self.gridsize[0], self.ice_boundary_x*self.ppm)
+        ice_rect = pygame.Rect(0,self.ice_boundary_x*self.ppm, self.gridsize[0],self.gridsize[1] )
         pygame.draw.rect(self.screen, LIGHT_GREEN,green_rect,0)
         pygame.draw.rect(self.screen, LIGHT_BLUE,ice_rect,0)
         start_rect = pygame.Rect(self.ppm*self.start[0], self.ppm*self.start[1], view_wid, view_wid)
@@ -132,46 +125,18 @@ class NavEnv():
             pygame.draw.line(self.screen,self.path_color,(self.ppm*self.pos_history[i]).astype(np.int32),(self.ppm*self.pos_history[i+1]).astype(np.int32), 8)
         for i in range(len(self.desired_pos_history)-1):
             pygame.draw.line(self.screen,(0,100,0,1),(self.ppm*self.desired_pos_history[i]).astype(np.int32),(self.ppm*self.desired_pos_history[i+1]).astype(np.int32), 2)
-        if np.random.randint(0,6) == 2:
-            pygame.display.flip()
+        #if np.random.randint(2) == 2:
+        pygame.display.flip()
 
     def collision_fn(self, pt):
         ret =  np.array([obs.in_collision(pt) for obs in self.obstacles]).any() or (pt > self.gridsize/self.ppm).any() or (pt < 0).any()
         return ret
 
-class Obstacle():
-    def __init__(self, origin, w,y):
-        self.origin = origin
-        self.x = w
-        self.y = y
-
-    def render(self,screen, ppm = 1):
-        py_rect = pygame.Rect(ppm*self.origin[0], ppm*self.origin[1],ppm*self.x,ppm*self.y)
-        pygame.draw.rect(screen, (50,0,0,1),py_rect,0)
-
-    def in_collision(self,pt):
-        if (pt > self.origin).all() and (pt < self.origin + np.array((self.x, self.y))).all():
-            return True
-        return False
-
-
-class Quicksand():
-    def __init__(self, origin, r):
-        self.origin = origin
-        self.r = r
-
-    def render(self,screen, ppm = 1):
-        pygame.draw.circle(screen, (242,229,194,1),(int(ppm*self.origin[0]), int(ppm*self.origin[1])), int(ppm*self.r),0)
-
-    def in_collision(self,pt):
-        if np.linalg.norm(np.subtract(pt,self.origin)) < self.r :
-            print("In quicksand")
-            return True
-        return False
-
 
 def create_box2d_box(h, w):
     return b2PolygonShape(vertices = [(0,0), (0,h), (w, h),(w,0), (0,0)] )
+
+
 
 if __name__ == "__main__":
     ne = NavEnv(np.array([0.,0.]),np.array([0.5,0.5])) 

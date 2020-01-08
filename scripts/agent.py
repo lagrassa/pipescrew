@@ -1,9 +1,11 @@
 from history import History
+from scipy.stats import multivariate_normal as mvn
+from belief import Belief
+from sklearn import mixture
 import numpy as np
 from nav_env import NavEnv
 from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
-from tslearn.clustering import TimeSeriesKMeans
 """
 Can make decisions based on a nav_env
 """
@@ -12,13 +14,17 @@ Can make decisions based on a nav_env
 class Agent:
     def __init__(self, show_training = False):
         self.history = History()
+        self.belief = Belief()
         self.show_training = show_training
         self.goal_threshold = 0.02
+        self.max_xdot = 2
+        self.guapo_eps = 0.9
+        self.cluster_planning_history = self.dmp_cluster_planning_history
     def follow_path(self, ne, path, force=None):
         kp = 10  # 50
-        delay = 9
+        delay = 2
         kd = 0.4
-        timeout = 4
+        timeout = 6
         for pt in path:
             # xdd = 2*(pt-ne.get_pos()-ne.get_vel()*ne.dt)/(ne.dt**2) #inverse dynamics here
             for _ in range(timeout):
@@ -26,11 +32,14 @@ class Agent:
                 if traj_dist < 0.01:
                     break
                 xdd = kp * (pt - ne.get_pos()) - kd * (ne.get_vel())
+                if np.linalg.norm(xdd) > self.max_xdot:
+                    xdd = self.max_xdot*xdd/(np.linalg.norm(xdd))
+                #print(np.linalg.norm(xdd))
                 for i in range(delay):
                     ne.step(*xdd)
             if self.show_training and traj_dist > 0.1:
                 print("High traj dist at", traj_dist)
-    def do_rl(self, N=3):
+    def do_rl(self, N=300):
         #sample point, pick cluster, do RL on that cluster
         for i in range(N):
             start = np.random.uniform(size=2, low=0, high= 0.7)
@@ -38,6 +47,7 @@ class Agent:
             dmp_traj, best_idx = self.dmp_plan(start, goal, ret_cluster = True)
             ne = NavEnv(start, goal, slip=False, visualize =self.show_training)
             self.follow_path(ne,dmp_traj)
+            #print("Goal dist", np.linalg.norm(ne.get_pos()-goal))
             result = -np.sign(np.linalg.norm(ne.get_pos()-goal))
             self.do_rl_on_cluster(self.dmp_traj_clusters[best_idx], result)
             
@@ -51,26 +61,31 @@ class Agent:
         if goals is None:
             goals = (np.array((1, 0.67)),)
         thresh = 0.08
-
-        for i in range(len(starts)):
-            for j in range(len(goals)):
-                start = np.array(starts[i])
-                goal = goals[j]
-                ne = NavEnv(start, goal, slip=False, visualize =self.show_training)
-                path = self.plan_path(ne,start, goal)
-                if path is None:
-                    print("No path found")
-                else:
-                    ne.desired_pos_history = path
-                    self.follow_path(ne, path)
-
-                    if np.linalg.norm(ne.get_pos() - goal) < thresh:
-                        print("Found one close enough to add")
-                        self.history.starts.append(start)
-                        self.history.execution_times.append(ne.steps_taken)
-                        self.history.paths.append(np.vstack(path))
-        if len(self.history.paths) > 0:
-            self.history.paths = pad_paths(self.history.paths) #put it in a nicer form
+        new_paths = [] 
+        while len(new_paths) < N:
+            for i in range(len(starts)):
+                for j in range(len(goals)):
+                    start = np.array(starts[i])
+                    goal = goals[j]
+                    ne = NavEnv(start, goal, slip=False, visualize =self.show_training)
+                    path = self.plan_path(ne,start, goal)
+                    if path is None:
+                        print("No path found")
+                    else:
+                        ne.desired_pos_history = path
+                        self.follow_path(ne, path)
+                        if np.linalg.norm(ne.get_pos() - goal) < thresh:
+                            print("Found one close enough to add")
+                            self.history.starts.append(start)
+                            self.history.execution_times.append(ne.steps_taken)
+                            assert(np.linalg.norm(path) != 0)
+                            new_paths.append(np.vstack(path))
+                            if len(new_paths) >= N:
+                                break
+                if len(new_paths) >= N:
+                    break
+        if len(new_paths) > 0:
+            self.history.paths = pad_and_add_paths(new_paths, self.history.paths) #put it in a nicer form
         else:
             print("out of ",len(starts), "things to iterate over, I got none")
     """
@@ -111,14 +126,19 @@ class Agent:
             return ret
 
         return birrt(start, goal, distance, sample, extend, collision)
-    def cluster_planning_history(self,k=2):
+    def traj_cluster_planning_history(self,k=2):
 
         self.dmp_traj_clusters = []
+        
+        from tslearn.clustering import TimeSeriesKMeans
         kmeans = TimeSeriesKMeans(n_clusters=k).fit(self.history.paths)
         #sort into groups, make them into a dmp_traj_cluster, all into one cluster for now
         for i in range(k):
             center = kmeans.cluster_centers_[i]
             relevant_labels = np.where(kmeans.labels_ == i)[0]
+            if len(relevant_labels) == 0:
+                print("Empty cluster")
+                continue
             execution_times = np.array(self.history.execution_times)[relevant_labels]
             path_data = self.history.paths[relevant_labels]
             formatted_path_data = np.zeros((path_data.shape[0], path_data.shape[2], path_data.shape[1])) #gets ugly if there's only one now
@@ -128,6 +148,25 @@ class Agent:
 
             new_dmp_traj_cluster = DMPTrajCluster(formatted_path_data, center, execution_times=execution_times, rl=True)
             self.dmp_traj_clusters.append(new_dmp_traj_cluster)
+    def dmp_cluster_planning_history(self,k=2):
+        self.dmp_traj_clusters = []
+        from tslearn.clustering import TimeSeriesKMeans
+        kmeans = TimeSeriesKMeans(n_clusters=k).fit(self.history.paths)
+        #fit all of these to different DMPS then cluster
+        for i in range(self.history.paths.shape[0]):
+            path_data = self.history.paths[i]
+            formatted_path_data =  path_data.reshape((1,path_data.shape[1], path_data.shape[0]))
+            center = formatted_path_data[0]
+            new_dmp_traj_cluster = DMPTrajCluster(formatted_path_data, center, execution_times = [self.history.execution_times[i]],rl=True)
+            self.dmp_traj_clusters.append(new_dmp_traj_cluster)
+        #cluster based on weights
+        weight_list = [dmp.dmp.w for dmp in self.dmp_traj_clusters]
+        weights_to_cluster = np.zeros((len(self.dmp_traj_clusters), weight_list[0].shape[1]*weight_list[0].shape[0]))
+        for i in range(len(weight_list)):
+            weights_to_cluster[i] = weight_list[i].flatten()
+        self.gmm = mixture.GaussianMixture(n_components=3, covariance_type='full').fit(weights_to_cluster)
+        import ipdb; ipdb.set_trace()
+        #plot these somehow
 
     def dmp_plan(self, start, goal, ret_cluster=False):
         #select cluster where first point is closest to start
@@ -136,21 +175,49 @@ class Agent:
             return self.dmp_traj_clusters[best_idx].rollout(start, goal), best_idx
         else:
             return self.dmp_traj_clusters[best_idx].rollout(start, goal)
-        """
-        min_dists = []
-        best_k = 2
-        for path in self.history.paths:
-            min_dist_pt = closest_pt_index(path, start)
-            min_dists.append(min_dist_pt)
-        sorted_by_dist_idxs = np.argsort(min_dists)
-        closest_pt_idxs = [closest_pt_index(self.history.paths[sorted_by_dist_idx], start) for sorted_by_dist_idx in
-                           sorted_by_dist_idxs]
-        best_path_idxs = sorted_by_dist_idxs[:best_k]
-        best_paths = [np.vstack(self.history.paths[dist_idx][pt_idx:]) for dist_idx, pt_idx in
-                      zip(best_path_idxs, closest_pt_idxs)]
-        """
 
+    """
+    Probability distribution of action given state
+    1. determine if s \in s_hat_uncertain
+    2. choose appropriate policy
+    """
+    def policy(self,ne,pos):
+        width = 0.11
+        p_in_s_uncertain = self.in_s_uncertain.cdf(pos+width)-self.in_s_uncertain.cdf(pos-width)
+        if p_in_s_uncertain > self.guapo_eps:
+            return self.model_free_policy(pos, ne)
+        else:
+            return self.model_based_policy(pos, ne)
 
+    """
+    get into s_hat_uncertain of ne, just the nearest centroids of the gaussians if you're going to do that
+    """
+    def model_based_policy(self,s, ne):
+        return mvn(mean=[0,0], cov=0.1)
+    """
+    do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
+    """
+    def model_free_policy(self, s, ne):
+        return mvn(mean=[0,0], cov=0.1)
+
+    """
+    Main control loop,
+    uses mb policy to get into s_hat_uncertain of ne, and then mf to maximize reward
+    executes policy to get feedback and update state
+    obstacle prior is a rough idea of where the obstacle is
+    """
+    def achieve_goal(self, ne,goal, obstacle_prior, N = 1):
+        #are we in s_hat_uncertain?
+        pos = ne.get_pos()
+        self.in_s_uncertain = obstacle_prior
+        actions = []
+        states = []
+        for i in range(N):
+            action = self.policy(ne,pos).rvs()
+            state = ne.step(*action)
+            actions.append(action)
+            states.append(state)
+        return states, actions
 
 def print_path_stats(path):
     max_x_diff = np.max(np.diff(np.array(path)[:, 0]))
@@ -165,9 +232,9 @@ def closest_pt_index(path, state):
     min_dist_pt = np.argmin(dists)
     return min_dist_pt
 
-def pad_paths(paths):
+def pad_and_add_paths(paths, old_path_history):
     longest_path = max(paths, key=lambda x: x.shape[0]).shape[0]
-    trajs = np.zeros((len(paths),) + (longest_path,2))
+    new_trajs = np.zeros((len(paths),) + (longest_path,2))
     for i in range(len(paths)):
         path = paths[i]
         diff = longest_path - path.shape[0]
@@ -175,6 +242,12 @@ def pad_paths(paths):
             padding = np.ones((diff, 2)) * path[-1]
             paths[i] = np.vstack([path, padding])
 
-        trajs[i, :] = paths[i]
-    return trajs
+        new_trajs[i, :] = paths[i]
+    if len(old_path_history) == 0:
+        return new_trajs
+    else:
+        combined_trajs = np.zeros((len(paths)+len(old_path_history), max(new_trajs.shape[1], old_path_history.shape[1]),2) )
+        combined_trajs[:len(old_path_history), :old_path_history.shape[1]] = old_path_history
+        combined_trajs[len(paths):,:new_trajs.shape[1] ] = new_trajs
+        return combined_trajs
 
