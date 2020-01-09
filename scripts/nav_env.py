@@ -19,7 +19,7 @@ class NavEnv():
         self.m = 1
         self.steps_taken = 0
         self.mu = -1
-        self.ppm = 200.
+        self.ppm = 100.
         self.joint = None
         self.ice_boundary_x = 150./self.ppm
         self.quicksand_ring = Quicksand((0.4,0.4), 0.00)
@@ -50,8 +50,9 @@ class NavEnv():
         self.visualize = visualize
         if self.visualize:
             pygame.init()
-            self.screen = pygame.display.set_mode(self.gridsize)
-            self.screen.fill((255,255,255))
+            self.world_screen = pygame.display.set_mode(self.gridsize)
+            self.belief_screen =pygame.display.set_mode(self.gridsize)
+            self.world_screen.fill((255, 255, 255))
             pygame.display.flip()
             self.render()
 
@@ -86,6 +87,7 @@ class NavEnv():
 
     '''
     Rolls dynamical system 1 dt according to x'', y''
+    implements openai gym interface
     ''' 
     def step(self,x,y):
         old_pos = np.array(self.agent.position.tuple)
@@ -94,6 +96,7 @@ class NavEnv():
         move = np.array((x,y))
         #import ipdb; ipdb.set_trace()
         self.agent.ApplyForceToCenter(force=move,wake = True)
+        import ipdb; ipdb.set_trace()
         #import ipdb; ipdb.set_trace()
         self.world.Step(self.dt, 16, 10)
         new_pos = np.array(self.agent.position.tuple)
@@ -101,33 +104,67 @@ class NavEnv():
         self.steps_taken +=1
         if self.visualize:
             self.render()
+        done = self.goal_condition_met()
+        return self.get_obs(), int(done), done, {}
+
+
     def plot_path(self,path):
         self.render(flip=False)
-        pygame.draw.lines(self.screen, (0,0,255),False,self.ppm*path, 6)
+        pygame.draw.lines(self.world_screen, (0, 0, 255), False, self.ppm * path, 6)
         pygame.display.flip()
 
     def goal_condition_met(self):
         return np.linalg.norm(self.get_pos()-self.goal) < 0.02
+    """
+    2D occupancy grid @param width units in pix away from the agent
+    with the agent centered. 
+    
+    """
+    def get_obs(self):
+        self.belief_screen.fill((255,255,255))
+        self.render(belief_only=True, flip=True)
+        width = 12
+        grid = np.zeros((2*width+1, 2*width+1))
+        i_range =  range(int(self.ppm*(self.agent.position[0]))-width, int(self.ppm*(self.agent.position[0]))+width+1)
+        j_range = range(int(self.ppm*(self.agent.position[1]))-width, int(self.ppm*(self.agent.position[1]))+width+1)
+        for grid_i, i in zip(range(len(i_range)), i_range):
+            for grid_j, j in zip(range(len(j_range)),j_range):
+                i = np.clip(i, 0,self.gridsize[0]-1)
+                j = np.clip(j, 0,self.gridsize[1]-1)
+                grid[grid_i,grid_j] = np.mean(self.belief_screen.get_at((i,j))[0:3])
 
-    def render(self, flip = True):
-        view_wid =10
+        return grid.T
+
+
+        #returns image of area around agent
+        
+
+    def render(self, flip = True, belief_only = False):
+        view_wid =3
         #draw green for normal, light blue for the ice
-        green_rect = pygame.Rect(0, 0, self.gridsize[0], self.ice_boundary_x*self.ppm)
-        ice_rect = pygame.Rect(0,self.ice_boundary_x*self.ppm, self.gridsize[0],self.gridsize[1] )
-        pygame.draw.rect(self.screen, LIGHT_GREEN,green_rect,0)
-        pygame.draw.rect(self.screen, LIGHT_BLUE,ice_rect,0)
-        start_rect = pygame.Rect(self.ppm*self.start[0], self.ppm*self.start[1], view_wid, view_wid)
-        goal_rect = pygame.Rect(self.ppm*self.goal[0],self.ppm*self.goal[1], view_wid, view_wid)
-        pygame.draw.rect(self.screen, (170,0,0,1),start_rect,0)
-        pygame.draw.rect(self.screen, (0,170,0,1),goal_rect,0)
+        if not belief_only:
+            green_rect = pygame.Rect(0, 0, self.gridsize[0], self.ice_boundary_x*self.ppm)
+            ice_rect = pygame.Rect(0,self.ice_boundary_x*self.ppm, self.gridsize[0],self.gridsize[1] )
+            pygame.draw.rect(self.world_screen, LIGHT_GREEN, green_rect, 0)
+            pygame.draw.rect(self.world_screen, LIGHT_BLUE, ice_rect, 0)
+            start_rect = pygame.Rect(self.ppm*self.start[0]-view_wid/2, self.ppm*self.start[1]-view_wid/2, view_wid, view_wid)
+            goal_rect = pygame.Rect(self.ppm*self.goal[0]-view_wid/2.,self.ppm*self.goal[1]-view_wid/2., view_wid, view_wid)
+            pygame.draw.rect(self.world_screen, (170, 0, 0, 1), start_rect, 0)
+            pygame.draw.rect(self.world_screen, (0, 170, 0, 1), goal_rect, 0)
+
+        robot_rect = pygame.Rect(self.ppm*self.agent.position[0]-view_wid/2.,self.ppm*self.agent.position[1]-view_wid/2., view_wid, view_wid)
+        pygame.draw.rect(self.belief_screen, (10, 0, 200, 1), robot_rect, 0)
+        pygame.draw.rect(self.world_screen, (10, 0, 200, 1), robot_rect, 0)
         for obs in self.obstacles:
-            obs.render(self.screen, ppm = self.ppm)
-        self.quicksand_ring.render(self.screen,ppm = self.ppm)
-        for i in range(len(self.pos_history)-1):
-            pygame.draw.line(self.screen,self.path_color,(self.ppm*self.pos_history[i]).astype(np.int32),(self.ppm*self.pos_history[i+1]).astype(np.int32), 8)
-        for i in range(len(self.desired_pos_history)-1):
-            pygame.draw.line(self.screen,(0,100,0,1),(self.ppm*self.desired_pos_history[i]).astype(np.int32),(self.ppm*self.desired_pos_history[i+1]).astype(np.int32), 2)
-        #if np.random.randint(2) == 2:
+            obs.render(self.world_screen, ppm = self.ppm)
+            obs.render(self.belief_screen, ppm=self.ppm)
+        if not belief_only:
+            self.quicksand_ring.render(self.world_screen, ppm = self.ppm)
+            for i in range(len(self.pos_history)-1):
+                pygame.draw.line(self.world_screen, self.path_color, (self.ppm * self.pos_history[i]).astype(np.int32), (self.ppm * self.pos_history[i + 1]).astype(np.int32), 8)
+            for i in range(len(self.desired_pos_history)-1):
+                pygame.draw.line(self.world_screen, (0, 100, 0, 1), (self.ppm * self.desired_pos_history[i]).astype(np.int32), (self.ppm * self.desired_pos_history[i + 1]).astype(np.int32), 2)
+            #if np.random.randint(2) == 2:
         if flip:
             pygame.display.flip()
 

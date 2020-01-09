@@ -1,5 +1,5 @@
 from numpy.core._multiarray_umath import ndarray
-
+from spinup.algos.sac import sac, core
 from history import History
 from scipy.stats import multivariate_normal as mvn
 from belief import Belief
@@ -233,6 +233,9 @@ class Agent:
     """
     def model_free_policy(self, s, ne):
         #do SAC here
+        sac(lambda: ne, actor_critic=core.mlp_actor_critic,
+            ac_kwargs=dict(hidden_sizes=[32,32]),
+             epochs=1)
         return mvn(mean=[0,0], cov=0.1)
 
     """

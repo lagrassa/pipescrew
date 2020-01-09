@@ -1,8 +1,6 @@
 from nav_env import NavEnv, line_world_obstacles
 from scipy.stats import multivariate_normal as mvn
-from screwpipe import PipeGraspEnv
 from agent import Agent
-from pipe_agent import PipeAgent
 import numpy as np
 
 def test_lineworld():
@@ -58,8 +56,20 @@ def test_model_based_policy():
     ne.render(flip=True)
     resp = input("confirm looks good: \n")
     assert("y" in resp)
+def test_get_obs():
+    goal = np.array((0.1,0.3))
+    obstacles = line_world_obstacles(goal)
+    ne = NavEnv(start=np.array((0.1, 0.28)), goal = goal, obstacles = obstacles)
+    ne.render()
+    grid = ne.get_obs()
+    from PIL import Image
+    im = Image.fromarray(grid)
+    im.resize((400,400)).show()
+    resp = input("confirm looks good: \n")
+    assert("y" in resp)
 
-test_model_based_policy()
+test_get_obs()
+
 
 
 
