@@ -28,6 +28,7 @@ class Agent:
         self.guapo_eps = 0.9
         self.rmp = None
         self.cluster_planning_history = self.dmp_cluster_planning_history
+        self.pd_errors = []
     def follow_path(self, ne, path, force=None):
         kp = 10  # 50
         delay = 2
@@ -204,7 +205,7 @@ class Agent:
             x_g = centroid
             #leaf1 = CollisionAvoidance("collision_avoidance", r, None,epsilon=0.2 )
             leaf2 = GoalAttractorUni("goal_attractor",r, x_g)
-
+            self.rmp = r
             def dynamics(t, state):
                 state = state.reshape(2, -1)
                 x = state[0]
@@ -215,20 +216,23 @@ class Agent:
             self.dynamics = dynamics
 
         sol = solve_ivp(self.dynamics, [0.001, nsteps], s)
-        import ipdb; ipdb.set_trace()
         return sol.y[0:2, :]
 
     """
     get into s_hat_uncertain of ne, just the nearest centroids of the gaussians if you're going to do that
     """
-    def model_based_policy(self,s, ne, nsteps = 10):
-        trajectory = self.model_based_trajectory(s, ne, nsteps=nsteps)
-        #find corresponding point and go to it
-        return mvn(mean=trajectory[-1], cov=0.001)
+    def model_based_policy(self,s, ne, nsteps = 10, recompute_rmp=True):
+        kp = 15
+        kd = 0.001
+        if recompute_rmp:
+            self.model_based_trajectory(s, ne, nsteps=nsteps)
+        xdd = kp*self.rmp.solve(s[0:2], s[2:]).flatten()
+        return mvn(mean=xdd, cov=0.001)
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
     def model_free_policy(self, s, ne):
+        #do SAC here
         return mvn(mean=[0,0], cov=0.1)
 
     """
