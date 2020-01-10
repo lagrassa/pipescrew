@@ -45,7 +45,7 @@ line centered a few cm below the goal in the y direction, centered in the x dire
 def line_world_obstacles(goal):
     length = 0.15
     thickness = 0.03
-    offset = 0.01
+    offset = 0.02
     x = goal[0]-length/2.
     y = goal[1] + offset
     return [Obstacle(np.array((x,y)), length, thickness)]
