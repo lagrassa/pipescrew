@@ -1,5 +1,7 @@
 from numpy.core._multiarray_umath import ndarray
 from spinup.algos.sac import sac, core
+from stable_baselines.ppo2 import PPO2
+from stable_baselines.common.policies import MlpPolicy
 from history import History
 from scipy.stats import multivariate_normal as mvn
 from belief import Belief
@@ -45,7 +47,7 @@ class Agent:
                     xdd = self.max_xdot*xdd/(np.linalg.norm(xdd))
                 #print(np.linalg.norm(xdd))
                 for i in range(delay):
-                    ne.step(*xdd)
+                    ne.step(xdd)
             if self.show_training and traj_dist > 0.1:
                 print("High traj dist at", traj_dist)
     def do_rl(self, N=300):
@@ -190,13 +192,13 @@ class Agent:
     1. determine if s \in s_hat_uncertain
     2. choose appropriate policy
     """
-    def policy(self,ne,pos):
+    def policy(self,ne,pos, obs):
         width = 0.11
         p_in_s_uncertain = self.belief.in_s_uncertain.cdf(pos+width)-self.belief.in_s_uncertain.cdf(pos-width)
         if p_in_s_uncertain > self.guapo_eps:
             return self.model_free_policy(pos, ne)
         else:
-            return self.model_based_policy(pos, ne)
+            return self.model_based_policy(obs, ne)
 
     def model_based_trajectory(self, s, ne, nsteps = 10):
         centroid =self.belief.in_s_uncertain.mean
@@ -228,18 +230,22 @@ class Agent:
             self.model_based_trajectory(s, ne, nsteps=nsteps)
         xdd = kp*self.rmp.solve(s[0:2], s[2:]).flatten()
         return mvn(mean=xdd, cov=0.001)
+    def train_autoencoder(self):
+        pass
+
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
-    def model_free_policy(self, s, ne):
-        #do SAC here
-        sac(lambda: ne, actor_critic=core.mlp_actor_critic,
-            ac_kwargs=dict(hidden_sizes=[32,32]),
-             epochs=1)
-        return mvn(mean=[0,0], cov=0.1)
+    def model_free_policy(self, obs, ne, n_epochs, train=True):
+        if train:
+            self.policy = PPO2(env=ne, policy= MlpPolicy,n_steps = 40,verbose = 2,noptepochs = 10, learning_rate = 3e-4, ent_coef = 0,gamma = 0.1)
+            self.policy.learn(total_timesteps = n_epochs*40)
+            #self.policy = sac.sac(lambda: ne, actor_critic=core.mlp_actor_critic,
+            #ac_kwargs=dict(hidden_sizes=[32,32]),epochs=n_epochs, steps_per_epoch = 300, max_ep_len = 30)
+        return self.policy.step([obs])[0].flatten()
 
     """
-    Main control loop,
+Main control loop,
     uses mb policy to get into s_hat_uncertain of ne, and then mf to maximize reward
     executes policy to get feedback and update state
     obstacle prior is a rough idea of where the obstacle is
@@ -252,7 +258,7 @@ class Agent:
         states = []
         for i in range(N):
             action = self.policy(ne,state).rvs()
-            state = ne.step(*action)
+            state = ne.step(action)
             actions.append(action)
             states.append(state)
         return states, actions

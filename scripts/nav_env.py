@@ -1,6 +1,7 @@
 import pygame
 from obstacle import line_world_obstacles, Obstacle, two_openings_obstacles, Quicksand
 import numpy as np
+from gym.spaces import Box
 from Box2D import *
 
 #convert to Box2D
@@ -13,14 +14,20 @@ They need to be boxes. Origin is the top right
 LIGHT_GREEN=(172, 255, 192)
 LIGHT_BLUE = (158,242,254)
 class NavEnv():
-    def __init__(self, start,goal,slip=True , visualize=True, shift=None, obstacles = two_openings_obstacles()):
+    def __init__(self, start,goal,slip=True , visualize=False, shift=None, obstacles = two_openings_obstacles(), gridsize = np.array([300,400])):
         self.slip=slip
-        self.gridsize = np.array([300,400])
+        self.gridsize = gridsize
         self.m = 1
         self.steps_taken = 0
+        self.metadata = {}
         self.mu = -1
-        self.ppm = 100.
+        self.ppm = 1000
         self.joint = None
+        self.obs_width = 12
+        obs_size = (2*self.obs_width+1)**2
+        self.observation_space = Box(low = np.zeros(obs_size),high = np.ones(obs_size)*255)
+        self.observation_space = Box(low = np.zeros(4),high = np.ones(4)*100)
+        self.action_space = Box(low = np.array([0,-2]), high = np.array([0,2]))
         self.ice_boundary_x = 150./self.ppm
         self.quicksand_ring = Quicksand((0.4,0.4), 0.00)
         self.goal = goal
@@ -46,7 +53,7 @@ class NavEnv():
             shapes=create_box2d_box(obstacle.y, obstacle.x)
         )
 
-        self.dt = 0.01
+        self.dt = 0.05
         self.visualize = visualize
         if self.visualize:
             pygame.init()
@@ -55,6 +62,10 @@ class NavEnv():
             self.world_screen.fill((255, 255, 255))
             pygame.display.flip()
             self.render()
+        self.belief_screen =pygame.display.set_mode(self.gridsize)
+        self.belief_screen.fill((255,255,255))
+        self.render(belief_only=True, flip = True)
+
 
     def get_pos(self):
         return np.array(self.agent.position.tuple)
@@ -89,60 +100,69 @@ class NavEnv():
     Rolls dynamical system 1 dt according to x'', y''
     implements openai gym interface
     ''' 
-    def step(self,x,y):
+    def step(self,action):
+        action[0] = 0
         old_pos = np.array(self.agent.position.tuple)
         self.pos_history.append(old_pos)
         self.check_and_set_mu()
-        move = np.array((x,y))
+        move = action
         #import ipdb; ipdb.set_trace()
-        self.agent.ApplyForceToCenter(force=move,wake = True)
-        import ipdb; ipdb.set_trace()
+        self.agent.ApplyForceToCenter(force=move.tolist(),wake = True)
         #import ipdb; ipdb.set_trace()
-        self.world.Step(self.dt, 16, 10)
+        self.world.Step(self.dt, 6, 2)
         new_pos = np.array(self.agent.position.tuple)
         self.world.ClearForces()
         self.steps_taken +=1
         if self.visualize:
             self.render()
-        done = self.goal_condition_met()
-        return self.get_obs(), int(done), done, {}
-
+        goal_met = self.goal_condition_met()
+        done = (self.goal_distance() <= 0.01) or (self.goal_distance() > 0.15)
+        rew_scale = 3
+        return self.get_obs(), -rew_scale*self.goal_distance(), done, {}
 
     def plot_path(self,path):
         self.render(flip=False)
         pygame.draw.lines(self.world_screen, (0, 0, 255), False, self.ppm * path, 6)
         pygame.display.flip()
-
+    def goal_distance(self):
+        return np.linalg.norm(self.get_pos()-self.goal)
     def goal_condition_met(self):
-        return np.linalg.norm(self.get_pos()-self.goal) < 0.02
+        ret =  self.goal_distance() < 0.025
+        return ret
+    def reset(self):
+        self.__init__(start=self.start, obstacles=self.obstacles, goal=self.goal, gridsize = self.gridsize)
+        return self.get_obs()
     """
     2D occupancy grid @param width units in pix away from the agent
     with the agent centered. 
     
     """
     def get_obs(self):
+        '''
         self.belief_screen.fill((255,255,255))
         self.render(belief_only=True, flip=True)
-        width = 12
-        grid = np.zeros((2*width+1, 2*width+1))
-        i_range =  range(int(self.ppm*(self.agent.position[0]))-width, int(self.ppm*(self.agent.position[0]))+width+1)
-        j_range = range(int(self.ppm*(self.agent.position[1]))-width, int(self.ppm*(self.agent.position[1]))+width+1)
+        grid = np.zeros((2 * self.obs_width + 1, 2 * self.obs_width + 1))
+        i_range =  range(int(self.ppm*(self.agent.position[0])) - self.obs_width, int(self.ppm * (self.agent.position[0])) + self.obs_width + 1)
+        j_range = range(int(self.ppm*(self.agent.position[1])) - self.obs_width, int(self.ppm * (self.agent.position[1])) + self.obs_width + 1)
         for grid_i, i in zip(range(len(i_range)), i_range):
             for grid_j, j in zip(range(len(j_range)),j_range):
                 i = np.clip(i, 0,self.gridsize[0]-1)
                 j = np.clip(j, 0,self.gridsize[1]-1)
                 grid[grid_i,grid_j] = np.mean(self.belief_screen.get_at((i,j))[0:3])
 
-        return grid.T
-
+        return grid.T.flatten()
+        '''
+        scalar = 1.0
+        return scalar*np.array([self.agent.position, self.agent.GetLinearVelocityFromLocalPoint((0,0))]).flatten()
 
         #returns image of area around agent
-        
+
 
     def render(self, flip = True, belief_only = False):
         view_wid =3
         #draw green for normal, light blue for the ice
         if not belief_only:
+            import ipdb; ipdb.set_trace()
             green_rect = pygame.Rect(0, 0, self.gridsize[0], self.ice_boundary_x*self.ppm)
             ice_rect = pygame.Rect(0,self.ice_boundary_x*self.ppm, self.gridsize[0],self.gridsize[1] )
             pygame.draw.rect(self.world_screen, LIGHT_GREEN, green_rect, 0)
@@ -154,9 +174,11 @@ class NavEnv():
 
         robot_rect = pygame.Rect(self.ppm*self.agent.position[0]-view_wid/2.,self.ppm*self.agent.position[1]-view_wid/2., view_wid, view_wid)
         pygame.draw.rect(self.belief_screen, (10, 0, 200, 1), robot_rect, 0)
-        pygame.draw.rect(self.world_screen, (10, 0, 200, 1), robot_rect, 0)
+        if not belief_only:
+            pygame.draw.rect(self.world_screen, (10, 0, 200, 1), robot_rect, 0)
+            for obs in self.obstacles:
+                obs.render(self.world_screen, ppm = self.ppm)
         for obs in self.obstacles:
-            obs.render(self.world_screen, ppm = self.ppm)
             obs.render(self.belief_screen, ppm=self.ppm)
         if not belief_only:
             self.quicksand_ring.render(self.world_screen, ppm = self.ppm)

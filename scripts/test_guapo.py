@@ -67,8 +67,33 @@ def test_get_obs():
     im.resize((400,400)).show()
     resp = input("confirm looks good: \n")
     assert("y" in resp)
+def test_model_free():
+    goal = np.array((0.1,0.3))
+    obstacles = line_world_obstacles(goal)
+    obs_center = [obstacles[0].origin[0]+obstacles[0].x/2.0, obstacles[0].origin[1]]
+    cov = 0.001
+    obs_prior = mvn(mean=obs_center, cov= cov) # prior on the center of the line in xy space
+    agent = Agent(show_training = True)
+    agent.belief.in_s_uncertain = obs_prior
+    start = np.array((0.1, 0.25))
+    nsteps = 40
+    ne = NavEnv(start=start, goal = goal, obstacles = obstacles, gridsize = [5*50,5*70])
+    agent.model_free_policy(ne.get_obs(), ne, n_epochs=100, train=True)
+    ne.reset()
+    for i in range(nsteps):
+        action = agent.model_free_policy(ne.get_obs(), ne, n_epochs=1, train=False)
+        ne.step(action)
+        if i % 10 == 0:
+            print("action", action)
+            print("goal distance", ne.goal_distance())
+            print("position", ne.agent.position)
+    print("goal distance", ne.goal_distance())
+    assert(ne.goal_condition_met())
+    print("Test passed")
 
-test_get_obs()
+
+
+test_model_free()
 
 
 
