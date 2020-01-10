@@ -1,11 +1,12 @@
 from pipeworld import PipeWorld
+import time
 from history import History
 from collections import deque
 import pybullet as p
 import numpy as np
 from pybullet_tools.utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
 class PipeGraspEnv():
-    def __init__(self, visualize=True, bullet=None, shift=0):
+    def __init__(self, visualize=True, bullet=None, shift=0, start=None, goal=None):
         self.pw = PipeWorld(visualize=visualize, bullet=bullet)
         self.pipe_attach=None
         self.target_grip = 0.015
@@ -25,10 +26,11 @@ class PipeGraspEnv():
             p.enableJointForceTorqueSensor(self.pw.robot, 9)
             p.enableJointForceTorqueSensor(self.pw.robot, 10)
             next(joint_controller(self.pw.robot, self.joints, [ 0.    ,  0.    , -1.5708,  0.    ,  1.8675,  0.    , 0   ]))
+        self._shift = shift
         self.do_setup()
-        self.pw.shift_t_joint(shift,0)
 
-
+    def plot_path(self, path):
+        pass
     def approach(self):
         grasp = np.array([0,0,0.2])
         target_point_1 = np.array(get_pose(self.pw.pipe))[0]+grasp
@@ -55,12 +57,12 @@ class PipeGraspEnv():
         traj2 = self.go_to_pose(target_pose, obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
         return traj1+traj2
         
-    def insert(self, use_policy=False):
+    def insert(self, use_policy=False, target_force = 1):
         target_quat = (1,0.5,0,0) #get whatever it is by default
         grasp = np.array([0,0,0.18])
         target_point = np.array(self.hollow_pose)[0]+grasp
         target_pose = (target_point, target_quat)
-        traj = self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach], use_policy=use_policy, maxForce = 40,cart_traj=True)
+        traj = self.go_to_pose(target_pose, obstacles=[], attachments=[self.pipe_attach], use_policy=use_policy, maxForce = target_force,cart_traj=True)
         return traj
 
     def change_grip(self,num, force=0):
@@ -73,8 +75,8 @@ class PipeGraspEnv():
 
     def go_to_conf(self, conf):
         control_joints(self.pw.robot, get_movable_joints(self.pw.robot)+list(self.finger_joints), tuple(conf)+(self.target_grip,self.target_grip))
-        simulate_for_duration(0.2)
-        self.steps_taken += 0.2
+        simulate_for_duration(0.3)
+        self.steps_taken += 0.3
 
     def squeeze(self, force, width=None):
         self.squeeze_force = force
@@ -131,7 +133,7 @@ class PipeGraspEnv():
         total_traj = []
         if self.pw.handonly:
             p.changeConstraint(self.pw.cid, target_pose[0], target_pose[1], maxForce = maxForce)
-            for i in range(50):
+            for i in range(80):
                 simulate_for_duration(self.dt_pose)
                 self.pw.steps_taken += self.dt_pose 
                 if self.pw.steps_taken >= self.total_timeout:
@@ -180,14 +182,15 @@ class PipeGraspEnv():
                 if distance < 1e-3:
                     break
         return total_traj
-
+    def goal_condition_met(self):
+        return self.is_pipe_in_hole()
     def is_pipe_in_hole(self):
         pose_hollow, _ = p.getBasePositionAndOrientation(self.pw.hollow)
         pose_pipe, _ = p.getBasePositionAndOrientation(self.pw.pipe)
         xy_dist = np.linalg.norm(np.array(pose_pipe)[0:2]-np.array(pose_hollow)[0:2])
         z_dist = np.linalg.norm(pose_pipe[2]-pose_hollow[2])
         xy_threshold = 0.008
-        z_threshold = 0.064
+        z_threshold = 0.07
         if xy_dist < xy_threshold and z_dist < z_threshold:
             return True
         return False
@@ -225,7 +228,6 @@ class PipeGraspEnv():
         self.policy = train_policy(self.history) 
     def close(self):
         p.disconnect()
-        
          
     def do_setup(self):
         self.change_grip(0.025, force=0)
@@ -233,10 +235,16 @@ class PipeGraspEnv():
         self.change_grip(0.005, force=0.8) # force control this. 1 was ok
         simulate_for_duration(0.1)
         self.place()
+        simulate_for_duration(0.5)
+        self.steps_taken += 0.5
+        self.pw.shift_t_joint(self._shift,0)
         self.save_state()
 
 
 if __name__ == "__main__":
     pga = PipeGraspEnv(visualize=True, bullet="place.bullet")
-    pga.collect_trajs()
+    pga.do_setup()
+    import ipdb; ipdb.set_trace()
+    pga.insert()
+    pga.is_pipe_in_hole()
 #pga.insert()

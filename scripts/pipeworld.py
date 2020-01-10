@@ -43,8 +43,8 @@ class PipeWorld():
         p.changeDynamics(self.floor, -1, mass=0)
         #self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
         length =0.04
-        sec_width =  0.009
-        thick = 0.001
+        sec_width =  0.008
+        thick = 0.003
         angle_correction = -0.25 #not a nice hack to make the pipe look better
         self.hollow = make_cylinder(12,sec_width,length,thick, angle_correction)
         p.changeDynamics(self.hollow, -1, mass=0)
@@ -56,10 +56,9 @@ class PipeWorld():
         set_point(self.pipe, (0,0.08,0.015))
     def shift_t_joint(self, new_x, new_y):
         old_pos, old_orn = p.getBasePositionAndOrientation(self.hollow)
-        
         set_pose(self.hollow, ((new_x,new_y,old_pos[2]),old_orn))
-
 
 
 if __name__ == "__main__":
     pw = PipeWorld(visualize=True)
+    import ipdb; ipdb.set_trace()

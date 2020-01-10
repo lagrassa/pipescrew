@@ -14,10 +14,15 @@ def make_polygon(n, side_length):
         theta += 2*int_angle
     return pts
 
-def make_cylinder(n, side_length, height, width):
+def make_cylinder(n, side_length, height, width, CORRECTION_ANGLE=-0.29):
     verts = make_polygon(n, side_length)
     verts = np.vstack(verts)
+    mesh_sl = 0.2
+    mesh_h = 1
+    mesh_w =0.05
     shape_indices = [p.createCollisionShape(p.GEOM_BOX, halfExtents = [side_length/2., height/2., width/2.]) for _ in verts]
+    #shape_indices = [p.createCollisionShape(p.GEOM_MESH,fileName="../models/test.obj", meshScale=[side_length/mesh_sl, height/mesh_h, width/mesh_w]) for _ in verts]
+    shape_indices = [p.createCollisionShape(p.GEOM_MESH,fileName="../models/face8wide.obj", meshScale=[side_length/mesh_sl, height/mesh_h, width/mesh_w]) for _ in verts]
     #shape_indices = shape_indices[0:2]
 
     angle = ((n-2)*180)/n
@@ -46,11 +51,16 @@ def make_cylinder(n, side_length, height, width):
         else:
             midpt =np.mean(np.vstack([verts[i], verts[i+1]]),axis=0) 
             diff = verts[i+1]-verts[i]
-        curr_angle = np.arctan2(diff[1],diff[0])-(np.pi/2.0)
+        curr_angle = np.arctan2(diff[1],diff[0])-(np.pi/2.0)+np.pi+CORRECTION_ANGLE
         link_orientations.append(p.getQuaternionFromEuler((0,curr_angle,0)))
         x_width_shift = width
         y_width_shift = width
         link_positions.append((midpt[1]+y_width_shift,0,midpt[0]+x_width_shift))
+    #num_shapes = len(shape_indices)
+    #for j in range(num_shapes):
+    #    link_orientations.append(p.getQuaternionFromEuler((0,curr_angle,0)))
+    #    link_positions.append(p.getQuaternionFromEuler((0,curr_angle,0)))
+
 
     #shape_indices = shape_indices[0:2]
     #link_orientations = link_orientations[0:2]
@@ -76,8 +86,10 @@ def make_cylinder(n, side_length, height, width):
 
     return body
 #verts = make_polygon(16, 1)
-#p.connect(p.GUI)
-#make_cylinder(12,1,3,0.1)
+if __name__ == "__main__":
+    p.connect(p.GUI)
+    make_cylinder(12,1,3,0.1)
+    import ipdb; ipdb.set_trace()
 
 
 #xs = [pt[0] for pt in verts]

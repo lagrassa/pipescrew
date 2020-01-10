@@ -2,7 +2,6 @@ from history import History
 import numpy as np
 from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
-from tslearn.clustering import TimeSeriesKMeans
 from screwpipe import PipeGraspEnv
 """
 Can make decisions based on a nav_env
@@ -15,36 +14,39 @@ class PipeAgent:
         self.show_training = show_training
         self.grasp = np.array((0,0,0.067)) # acquire autonomously
 
-    def follow_path(self, pe, path):
+    def follow_path(self, pe, path, force = 100):
         kp = 10  # 50
         delay = 3
         kd = 0.4
-        pe.total_timeout= 5
+        pe.total_timeout= 7
         target_quat = (1,0.5,0,0)
         for pt in path:
             target_point = pt +self.grasp
-            pe.go_to_pose((target_point, target_quat), attachments = [pe.pipe_attach], maxForce = 100, cart_traj = True)
+            pe.go_to_pose((target_point, target_quat), attachments = [pe.pipe_attach], maxForce = force, cart_traj = True)
 
     def collect_planning_history(self, starts=None, goals = None, N =5):
         thresh = 0.08
         target_quat = (1,0.5,0,0) #get whatever it is by default
         vels = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-
-        env = PipeGraspEnv(visualize=False, shift=0)
-        for vel,_ in zip(vels, range(N)):
+        vel = 0.3
+        env = PipeGraspEnv(visualize=self.show_training, shift=0.005*np.random.random())
+        forces= np.random.uniform(size=(15,), low=50, high = 100)
+        for force,_ in zip(forces, range(N)):
             start = env.get_pos()
-            goal = np.array([0,0,0.1])
+            goal = np.array([0,0,0.05])
             path = self.plan_path(env,start, goal, vel)
             if path is None:
                 print("No path found")
             else:
                 env.desired_pos_history = path
-                self.follow_path(env,path)
+                self.follow_path(env,path, force = force)
                 if env.is_pipe_in_hole():
                     print("Found one close enough to add")
                     self.history.starts.append(start)
                     self.history.execution_times.append(env.steps_taken)
                     self.history.paths.append(np.vstack(path))
+                else:
+                    print("Did not reach goal state fllowing plan")
             env.restore_state()
             
         self.history.paths = pad_paths(self.history.paths) #put it in a nicer form
@@ -83,6 +85,7 @@ class PipeAgent:
     def cluster_planning_history(self,k=2):
 
         self.dmp_traj_clusters = []
+        from tslearn.clustering import TimeSeriesKMeans
         kmeans = TimeSeriesKMeans(n_clusters=k).fit(self.history.paths)
         #sort into groups, make them into a dmp_traj_cluster, all into one cluster for now
         for i in range(k):
@@ -139,7 +142,11 @@ def pad_paths(paths):
         diff = longest_path - path.shape[0]
         if diff != 0:
             padding = np.ones((diff, path.shape[-1])) * path[-1]
-            paths[i] = np.vstack([path, padding])
+            paths[i] = np.vstack([path, padding])+ 0.00001*np.random.random()
 
         trajs[i, :] = paths[i]
     return trajs
+
+if __name__ == "__main__":
+    pass
+
