@@ -117,6 +117,30 @@ def test_mb_mf_switch():
     assert (ne.goal_condition_met())
     print("Test passed")
 
+def test_collect_autoencoder_data():
+    goal = np.array((0.1, 0.4))
+    obstacles = line_world_obstacles(goal)
+    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
+    cov = 0.001
+    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
+    agent = Agent(show_training=True)
+    agent.belief.in_s_uncertain = obs_prior
+    start = np.array((0.1, 0.1))
+    ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
+    samples = agent.collect_autoencoder_data(ne,N=3)
+    from PIL import Image
+    for sample in samples:
+        print("sample shape", sample.shape)
+        img = Image.fromarray(sample).resize((300,300))
+        img.show()
+        resp = input("Does the image look reasonably useful?")
+        assert ("y" in resp)
+
+def test_autoencoder_training():
+    assert(False)
+def test_encoder_online():
+    assert(False)
+
 
 #test_model_free()
-test_mb_mf_switch()
+test_collect_autoencoder_data()

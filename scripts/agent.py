@@ -1,3 +1,4 @@
+from keras.losses import mse
 from numpy.core._multiarray_umath import ndarray
 from stable_baselines.common.cmd_util import  make_vec_env
 from stable_baselines.ppo2 import PPO2
@@ -11,6 +12,7 @@ from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
 from scipy.integrate import solve_ivp
 from rmpflow.rmp import RMPRoot
+from vae import vae, encoder, decoder, original_dim,inputs, outputs, z_log_var, K, z_mean, z_log_var, plot_model, batch_size
 from rmpflow.rmp_leaf import CollisionAvoidance, GoalAttractorUni
 
 """
@@ -22,9 +24,11 @@ class Agent:
     def __init__(self, show_training=False):
         self.history = History()
         self.belief = Belief()
+        self.autoencoder = None
         self.show_training = show_training
         self.goal_threshold = 0.02
         self.max_xdot = 2
+        self.vae_fn = "models/vae.h5y"
         self.guapo_eps = 0.9
         self.rmp = None
         self.cluster_planning_history = self.dmp_cluster_planning_history
@@ -194,6 +198,11 @@ class Agent:
         else:
             return self.dmp_traj_clusters[best_idx].rollout(start, goal)
 
+    def is_in_s_uncertain(self, ne):
+        width = 0.08 #user set
+        pos = ne.get_pos()
+        p_in_s_uncertain = self.belief.in_s_uncertain.cdf(pos + width) - self.belief.in_s_uncertain.cdf(pos - width)
+        return p_in_s_uncertain > self.guapo_eps
     """
     Probability distribution of action given state
     1. determine if s \in s_hat_uncertain
@@ -201,13 +210,12 @@ class Agent:
     """
 
     def sample_policy(self, ne, obs):
-        width = 0.15
-        pos = ne.get_pos()
-        p_in_s_uncertain = self.belief.in_s_uncertain.cdf(pos + width) - self.belief.in_s_uncertain.cdf(pos - width)
-        if p_in_s_uncertain > self.guapo_eps:
+        if self.is_in_s_uncertain(ne):
             return self.model_free_policy(ne.get_obs(), ne, load_model=True)
         else:
             return self.model_based_policy(obs, ne)
+    def random_policy(self, ne):
+        return np.random.uniform(low = ne.action_space.low, high = ne.action_space.high)
 
     def model_based_trajectory(self, s, ne, nsteps=10):
         centroid = self.belief.in_s_uncertain.mean
@@ -241,15 +249,64 @@ class Agent:
             self.model_based_trajectory(s, ne, nsteps=nsteps)
         xdd = kp * self.rmp.solve(s[0:2], s[2:]).flatten()
         return xdd
+    """
+    Collects N samples that would be useful to the autoencoder, which means samples in the "uncertain" region. 
+    Easiest thing to do is to use the MB policy to bring the agent into the uncertain region and then keep acting randomly
+    as long as its still in the uncertain region. 
+    """
+    def collect_autoencoder_data(self, ne, N = 10):
+        samples = []
+        s = np.array([ne.get_pos(), ne.get_vel()]).flatten()
+        while len(samples) < N:
+            if self.is_in_s_uncertain(ne):
+                samples.append(ne.get_obs())
+                action = self.random_policy(ne)
+                ne.step(action, dt = 1) #longer
+            else:
+                action = self.model_based_policy(s, ne)
+                ne.step(action)
+        return samples
 
-    def train_autoencoder(self):
-        pass
+
+    def train_autoencoder(self, ne, n_epochs = 20):
+        training_data = self.collect_autoencoder_data(ne, N = 5)
+        n_train = int(len(training_data)*4/5.)
+        x_train = training_data[:n_train]
+        x_test = training_data [n_train:]
+        # VAE loss = mse_loss or xent_loss + kl_loss
+        reconstruction_loss = mse(inputs, outputs)
+        reconstruction_loss *= original_dim
+        kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
+        kl_loss = K.sum(kl_loss, axis=-1)
+        kl_loss *= -0.5
+        vae_loss = K.mean(reconstruction_loss + kl_loss)
+        vae.add_loss(vae_loss)
+        vae.compile(optimizer='adam')
+        vae.summary()
+        plot_model(vae,
+                   to_file='vae_mlp.png',
+                   show_shapes=True)
+
+        vae.fit(x_train,
+                epochs=n_epochs,
+                batch_size=batch_size,
+                validation_data=(x_test, None))
+        vae.save_weights(self.vae_fn)
+
+    def autoencode(self,obs):
+        if self.autoencoder is None:
+            try:
+                vae.load_weights(self.vae_fn)
+            except FileNotFoundError:
+                print("File not found")
+        return self.autoencoder.predict([obs], batch_size = 1)
 
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
 
     def model_free_policy(self, obs, ne, n_epochs=1, train=True, load_model=False):
+        obs = self.autoencode(obs)
         if train:
             fn = "models/model1.h5"
             self.mf_policy = PPO2(env=ne, policy=MlpPolicy, n_steps=40, verbose=2, noptepochs=10, learning_rate=3e-4,
@@ -260,6 +317,7 @@ class Agent:
                 self.mf_policy.learn(total_timesteps=n_epochs * 40)
                 self.mf_policy.save(fn)
         return self.mf_policy.step([obs])[0].flatten()
+
 
     """
 Main control loop,
