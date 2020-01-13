@@ -1,4 +1,7 @@
 from keras.losses import mse
+from keras.layers import Lambda, Input, Dense
+from keras.models import Model
+from keras import backend as K
 from numpy.core._multiarray_umath import ndarray
 from stable_baselines.common.cmd_util import  make_vec_env
 from stable_baselines.ppo2 import PPO2
@@ -12,7 +15,7 @@ from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
 from scipy.integrate import solve_ivp
 from rmpflow.rmp import RMPRoot
-from vae import vae, encoder, decoder, original_dim,inputs, outputs, z_log_var, K, z_mean, z_log_var, plot_model, batch_size
+from vae import sampling, plot_model
 from rmpflow.rmp_leaf import CollisionAvoidance, GoalAttractorUni
 
 """
@@ -255,25 +258,62 @@ class Agent:
     as long as its still in the uncertain region. 
     """
     def collect_autoencoder_data(self, ne, N = 10):
-        samples = []
+        sample_obs = ne.get_obs()
+        samples = np.zeros((N,)+(sample_obs.shape[0]*sample_obs.shape[1],))
         s = np.array([ne.get_pos(), ne.get_vel()]).flatten()
-        while len(samples) < N:
+        i = 0
+        while i < N:
             if self.is_in_s_uncertain(ne):
-                samples.append(ne.get_obs())
+                samples[i, :] = ne.get_obs().flatten()
                 action = self.random_policy(ne)
                 ne.step(action, dt = 1) #longer
+                i +=1
             else:
                 action = self.model_based_policy(s, ne)
                 ne.step(action)
         return samples
+    def train_autoencoder(self, ne, n_epochs=50):
+        training_data = self.collect_autoencoder_data(ne, N=5)
+        sample_obs = ne.get_obs()
+        n_train = int(len(training_data) * 4 / 5.)
+        import ipdb; ipdb.set_trace()
+        x_train = training_data[:n_train, :]
+        x_test = training_data [n_train:, :]
+        x_train = x_train.astype('float32') / 255
+        x_test = x_test.astype('float32') / 255
+        image_size = sample_obs.shape[1]
+        original_dim = image_size * image_size
+        # network parameters
+        input_shape = (original_dim,)
+        intermediate_dim = 512
+        batch_size = 128
+        latent_dim = 2
+        epochs = 50
 
+        # VAE model = encoder + decoder
+        # build encoder model
+        inputs = Input(shape=input_shape, name='encoder_input')
+        x = Dense(intermediate_dim, activation='relu')(inputs)
+        z_mean = Dense(latent_dim, name='z_mean')(x)
+        z_log_var = Dense(latent_dim, name='z_log_var')(x)
+        # use reparameterization trick to push the sampling out as input
+        # note that "output_shape" isn't necessary with the TensorFlow backend
+        z = Lambda(sampling, output_shape=(latent_dim,), name='z')([z_mean, z_log_var])
+        # instantiate encoder model
+        encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
+        # build decoder model
+        latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
+        x = Dense(intermediate_dim, activation='relu')(latent_inputs)
+        outputs = Dense(original_dim, activation='sigmoid')(x)
 
-    def train_autoencoder(self, ne, n_epochs = 20):
-        training_data = self.collect_autoencoder_data(ne, N = 5)
-        n_train = int(len(training_data)*4/5.)
-        x_train = training_data[:n_train]
-        x_test = training_data [n_train:]
-        # VAE loss = mse_loss or xent_loss + kl_loss
+        # instantiate decoder model
+        decoder = Model(latent_inputs, outputs, name='decoder')
+        decoder.summary()
+        plot_model(decoder, to_file='vae_mlp_decoder.png', show_shapes=True)
+
+        # instantiate VAE model
+        outputs = decoder(encoder(inputs)[2])
+        vae = Model(inputs, outputs, name='vae_mlp')
         reconstruction_loss = mse(inputs, outputs)
         reconstruction_loss *= original_dim
         kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)

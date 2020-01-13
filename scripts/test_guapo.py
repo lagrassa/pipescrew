@@ -137,10 +137,20 @@ def test_collect_autoencoder_data():
         assert ("y" in resp)
 
 def test_autoencoder_training():
-    assert(False)
+    goal = np.array((0.1, 0.4))
+    obstacles = line_world_obstacles(goal)
+    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
+    cov = 0.001
+    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
+    agent = Agent(show_training=True)
+    agent.belief.in_s_uncertain = obs_prior
+    start = np.array((0.1, 0.1))
+    ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
+    agent.train_autoencoder(ne)
+    return agent, ne
 def test_encoder_online():
     assert(False)
 
 
 #test_model_free()
-test_collect_autoencoder_data()
+test_autoencoder_training()
