@@ -22,12 +22,13 @@ class NavEnv:
                  gridsize: object = np.array([300, 400])) -> object:
         self.slip = slip
         self.gridsize = gridsize
+        self.autoencoder = lambda x: x
         self.m = 1
         self.steps_taken = 0
         self.visualize = visualize
         self.metadata = {}
         self.mu = -1
-        self.ppm = 1000
+        self.ppm = 100
         self.view_wid = 4
         self.reward_range = Box(low=np.array([-100]),high=np.array([0]))
         self.joint = None
@@ -111,21 +112,23 @@ class NavEnv:
     implements openai gym interface
     '''
 
-    def step(self, action):
+    def step(self, action, dt = None):
         old_pos = np.array(self.agent.position.tuple)
+        if dt is None: dt = self.dt
         self.pos_history.append(old_pos)
         self.check_and_set_mu()
         move = action
         self.agent.ApplyForceToCenter(force=move.tolist(), wake=True)
-        self.world.Step(self.dt, 6, 2)
+        self.world.Step(dt, 6, 2)
         self.world.ClearForces()
         self.steps_taken += 1
         if self.visualize:
             self.render()
         done = (self.goal_distance() <= 0.01) or (self.goal_distance() > 0.15)
         rew_scale = 3
-        return self.get_obs(), -rew_scale * self.goal_distance(), done, {}
-
+        return self.autoencoder(self.get_obs()), -rew_scale * self.goal_distance(), done, {}
+    def get_state(self):
+        return np.hstack([self.get_pos(), self.get_vel()])
     def plot_path(self, path):
         self.render(flip=False)
         pygame.draw.lines(self.world_screen, (0, 0, 255), False, self.ppm * path, 6)
@@ -142,7 +145,8 @@ class NavEnv:
         self.__init__(start=self.start, obstacles=self.obstacles, goal=self.goal, gridsize=self.gridsize,
                       visualize=self.visualize)
         return self.get_obs()
-
+    def set_autoencoder(self, fn):
+        self.autoencoder = fn
     """
     2D occupancy grid @param width units in pix away from the agent
     with the agent centered. 
@@ -150,7 +154,6 @@ class NavEnv:
     """
 
     def get_obs(self):
-        """
         self.belief_screen.fill((255,255,255))
         self.render(belief_only=True, flip=True)
         grid = np.zeros((2 * self.obs_width + 1, 2 * self.obs_width + 1))
@@ -162,10 +165,10 @@ class NavEnv:
                 j = np.clip(j, 0,self.gridsize[1]-1)
                 grid[grid_i,grid_j] = np.mean(self.belief_screen.get_at((i,j))[0:3])
 
-        return grid.T.flatten()
-        """
-        scalar = 1.0
-        return scalar * np.array([self.agent.position, self.agent.GetLinearVelocityFromLocalPoint((0, 0))]).flatten()
+        return grid.T #n
+        # .flatten()
+        #scalar = 1.0
+        #return scalar * np.array([self.agent.position, self.agent.GetLinearVelocityFromLocalPoint((0, 0))]).flatten()
 
         # returns image of area around agent
 

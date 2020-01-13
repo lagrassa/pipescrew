@@ -3,7 +3,7 @@ from keras.layers import Lambda, Input, Dense
 from keras.models import Model
 from keras import backend as K
 from numpy.core._multiarray_umath import ndarray
-from stable_baselines.common.cmd_util import  make_vec_env
+from stable_baselines.common.cmd_util import make_vec_env
 from stable_baselines.ppo2 import PPO2
 from stable_baselines.common.policies import MlpPolicy
 from history import History
@@ -15,7 +15,7 @@ from motion_planners.rrt_connect import birrt
 from dmp_traj_cluster import DMPTrajCluster
 from scipy.integrate import solve_ivp
 from rmpflow.rmp import RMPRoot
-from vae import sampling, plot_model
+from vae import make_vae, train_vae
 from rmpflow.rmp_leaf import CollisionAvoidance, GoalAttractorUni
 
 """
@@ -201,11 +201,14 @@ class Agent:
         else:
             return self.dmp_traj_clusters[best_idx].rollout(start, goal)
 
-    def is_in_s_uncertain(self, ne):
-        width = 0.08 #user set
+    def is_in_s_uncertain(self, ne, verbose = False):
+        width = 0.1  # user set
         pos = ne.get_pos()
         p_in_s_uncertain = self.belief.in_s_uncertain.cdf(pos + width) - self.belief.in_s_uncertain.cdf(pos - width)
+        if verbose:
+            print(p_in_s_uncertain)
         return p_in_s_uncertain > self.guapo_eps
+
     """
     Probability distribution of action given state
     1. determine if s \in s_hat_uncertain
@@ -217,8 +220,9 @@ class Agent:
             return self.model_free_policy(ne.get_obs(), ne, load_model=True)
         else:
             return self.model_based_policy(obs, ne)
+
     def random_policy(self, ne):
-        return np.random.uniform(low = ne.action_space.low, high = ne.action_space.high)
+        return np.random.uniform(low=ne.action_space.low, high=ne.action_space.high)
 
     def model_based_trajectory(self, s, ne, nsteps=10):
         centroid = self.belief.in_s_uncertain.mean
@@ -252,112 +256,70 @@ class Agent:
             self.model_based_trajectory(s, ne, nsteps=nsteps)
         xdd = kp * self.rmp.solve(s[0:2], s[2:]).flatten()
         return xdd
+
     """
     Collects N samples that would be useful to the autoencoder, which means samples in the "uncertain" region. 
     Easiest thing to do is to use the MB policy to bring the agent into the uncertain region and then keep acting randomly
     as long as its still in the uncertain region. 
     """
-    def collect_autoencoder_data(self, ne, N = 10):
+
+    def collect_autoencoder_data(self, ne, n_data=10):
         sample_obs = ne.get_obs()
-        samples = np.zeros((N,)+(sample_obs.shape[0]*sample_obs.shape[1],))
+        samples = np.zeros((n_data,) + (sample_obs.shape[0] * sample_obs.shape[1],))
         s = np.array([ne.get_pos(), ne.get_vel()]).flatten()
         i = 0
-        while i < N:
+        while i < n_data:
             if self.is_in_s_uncertain(ne):
                 samples[i, :] = ne.get_obs().flatten()
-                action = self.random_policy(ne)
-                ne.step(action, dt = 1) #longer
-                i +=1
+                if i % 2 == 0:
+                   action = self.random_policy(ne)
+                else:
+                    action = self.model_based_policy(s, ne)
+                ne.step(action, dt=1)  # longer
+                i += 1
             else:
                 action = self.model_based_policy(s, ne)
                 ne.step(action)
         return samples
-    def train_autoencoder(self, ne, n_epochs=50):
-        training_data = self.collect_autoencoder_data(ne, N=5)
+
+    def train_autoencoder(self, ne, n_epochs=50, n_data=5):
+        training_data = self.collect_autoencoder_data(ne, n_data=n_data)
         sample_obs = ne.get_obs()
-        n_train = int(len(training_data) * 4 / 5.)
-        import ipdb; ipdb.set_trace()
-        x_train = training_data[:n_train, :]
-        x_test = training_data [n_train:, :]
-        x_train = x_train.astype('float32') / 255
-        x_test = x_test.astype('float32') / 255
         image_size = sample_obs.shape[1]
-        original_dim = image_size * image_size
-        # network parameters
-        input_shape = (original_dim,)
-        intermediate_dim = 512
-        batch_size = 128
-        latent_dim = 2
-        epochs = 50
-
-        # VAE model = encoder + decoder
-        # build encoder model
-        inputs = Input(shape=input_shape, name='encoder_input')
-        x = Dense(intermediate_dim, activation='relu')(inputs)
-        z_mean = Dense(latent_dim, name='z_mean')(x)
-        z_log_var = Dense(latent_dim, name='z_log_var')(x)
-        # use reparameterization trick to push the sampling out as input
-        # note that "output_shape" isn't necessary with the TensorFlow backend
-        z = Lambda(sampling, output_shape=(latent_dim,), name='z')([z_mean, z_log_var])
-        # instantiate encoder model
-        encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
-        # build decoder model
-        latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
-        x = Dense(intermediate_dim, activation='relu')(latent_inputs)
-        outputs = Dense(original_dim, activation='sigmoid')(x)
-
-        # instantiate decoder model
-        decoder = Model(latent_inputs, outputs, name='decoder')
-        decoder.summary()
-        plot_model(decoder, to_file='vae_mlp_decoder.png', show_shapes=True)
-
-        # instantiate VAE model
-        outputs = decoder(encoder(inputs)[2])
-        vae = Model(inputs, outputs, name='vae_mlp')
-        reconstruction_loss = mse(inputs, outputs)
-        reconstruction_loss *= original_dim
-        kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
-        kl_loss = K.sum(kl_loss, axis=-1)
-        kl_loss *= -0.5
-        vae_loss = K.mean(reconstruction_loss + kl_loss)
-        vae.add_loss(vae_loss)
-        vae.compile(optimizer='adam')
-        vae.summary()
-        plot_model(vae,
-                   to_file='vae_mlp.png',
-                   show_shapes=True)
-
-        vae.fit(x_train,
-                epochs=n_epochs,
-                batch_size=batch_size,
-                validation_data=(x_test, None))
+        n_train = int(len(training_data) * 4 / 5.)
+        vae, encoder, decoder, inputs, outputs = make_vae(image_size = image_size)
+        train_vae(vae, training_data, n_train, inputs, outputs, n_epochs=n_epochs)
         vae.save_weights(self.vae_fn)
 
-    def autoencode(self,obs):
+    def autoencode(self, obs):
         if self.autoencoder is None:
             try:
+                image_size = obs.shape[1]
+                vae, encoder, decoder, inputs, outputs = make_vae(image_size = image_size)
+                self.autoencoder = encoder
                 vae.load_weights(self.vae_fn)
             except FileNotFoundError:
                 print("File not found")
-        return self.autoencoder.predict([obs], batch_size = 1)
+        processed_obs = obs.flatten()
+        _, _, z = self.autoencoder.predict(processed_obs.reshape((1,processed_obs.shape[0])), batch_size=1)
+        return z.flatten()
 
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
 
     def model_free_policy(self, obs, ne, n_epochs=1, train=True, load_model=False):
-        obs = self.autoencode(obs)
+        ne.set_autoencoder(self.autoencode)
         if train:
             fn = "models/model1.h5"
             self.mf_policy = PPO2(env=ne, policy=MlpPolicy, n_steps=40, verbose=2, noptepochs=10, learning_rate=3e-4,
                                   ent_coef=0, gamma=0.1)
             if load_model:
-                self.mf_policy.load(fn, env = make_vec_env(lambda : ne))
+                self.mf_policy.load(fn, env=make_vec_env(lambda: ne))
             else:
                 self.mf_policy.learn(total_timesteps=n_epochs * 40)
                 self.mf_policy.save(fn)
         return self.mf_policy.step([obs])[0].flatten()
-
 
     """
 Main control loop,
@@ -366,10 +328,9 @@ Main control loop,
     obstacle prior is a rough idea of where the obstacle is
     """
 
-    def achieve_goal(self, ne, goal, obstacle_prior, N=1):
+    def achieve_goal(self, ne, goal, N=1):
         # are we in s_hat_uncertain?
         state = np.concatenate([ne.get_pos(), ne.get_vel()])
-        self.belief.in_s_uncertain = obstacle_prior
         actions = []
         states = []
         for i in range(N):

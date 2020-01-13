@@ -13,24 +13,16 @@ def test_lineworld():
 def test_achieve_goal():
     agent = Agent(show_training=True)
     goal = np.array((0.4, 0.5))
-    obstacles = line_world_obstacles(goal)
-    ne = NavEnv(start=np.array((0.1, 0.1)), goal=goal, obstacles=obstacles)
-    ne.render()
-    cov = 0.001
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent.achieve_goal(ne, goal, obs_prior, N=10)
+    start=np.array((0.1, 0.1))
+    agent, ne = make_agent_and_ne(start=start, goal=goal)
+    agent.achieve_goal(ne, goal, N=10)
 
 
 def test_model_based_traj():
     agent = Agent(show_training=True)
     goal = np.array((0.4, 0.5))
-    obstacles = line_world_obstacles(goal)
-    cov = 0.001
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent.belief.in_s_uncertain = obs_prior
-    ne = NavEnv(start=np.array((0.1, 0.1)), goal=goal, obstacles=obstacles)
+    start=np.array((0.1, 0.1))
+    agent, ne = make_agent_and_ne(start=start, goal=goal)
     nsteps = 40
     s0 = np.concatenate([ne.get_pos(), ne.get_vel()])
     mb_xs = agent.model_based_trajectory(s0, ne, nsteps=nsteps)
@@ -40,12 +32,8 @@ def test_model_based_traj():
 def test_model_based_policy():
     agent = Agent(show_training=True)
     goal = np.array((0.4, 0.5))
-    obstacles = line_world_obstacles(goal)
-    cov = 0.001
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent.belief.in_s_uncertain = obs_prior
-    ne = NavEnv(start=np.array((0.85, 0.1)), goal=goal, obstacles=obstacles)
+    start=np.array((0.85, 0.1))
+    agent, ne = make_agent_and_ne(goal=goal, start=start)
     nsteps = 40
     s0 = np.concatenate([ne.get_pos(), ne.get_vel()])
     s = s0
@@ -74,15 +62,9 @@ def test_get_obs():
 
 def test_model_free():
     goal = np.array((0.1, 0.3))
-    obstacles = line_world_obstacles(goal)
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    cov = 0.001
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent = Agent(show_training=True)
-    agent.belief.in_s_uncertain = obs_prior
     start = np.array((0.1, 0.25))
+    agent, ne = make_agent_and_ne(goal=goal, start=start)
     nsteps = 40
-    ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[5 * 50, 5 * 70], visualize=False)
     agent.model_free_policy(ne.get_obs(), ne, n_epochs=40, train=True)
     ne.reset()
     ne.setup_visuals()
@@ -102,32 +84,17 @@ def test_model_free():
 
 def test_mb_mf_switch():
     goal = np.array((0.1, 0.4))
-    obstacles = line_world_obstacles(goal)
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    cov = 0.001
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent = Agent(show_training=True)
-    agent.belief.in_s_uncertain = obs_prior
-    start = np.array((0.1, 0.1))
-    ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
+    agent, ne = make_agent_and_ne(goal=goal)
     ne.reset()
     ne.setup_visuals()
-    agent.achieve_goal(ne, goal, obs_prior, N = 200)
+    agent.achieve_goal(ne, goal,  N = 200)
     print("goal distance", ne.goal_distance())
     assert (ne.goal_condition_met())
     print("Test passed")
 
 def test_collect_autoencoder_data():
-    goal = np.array((0.1, 0.4))
-    obstacles = line_world_obstacles(goal)
-    obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
-    cov = 0.001
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
-    agent = Agent(show_training=True)
-    agent.belief.in_s_uncertain = obs_prior
-    start = np.array((0.1, 0.1))
-    ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
-    samples = agent.collect_autoencoder_data(ne,N=3)
+    agent, ne = make_agent_and_ne()
+    samples = agent.collect_autoencoder_data(ne, n_data=3)
     from PIL import Image
     for sample in samples:
         print("sample shape", sample.shape)
@@ -137,20 +104,36 @@ def test_collect_autoencoder_data():
         assert ("y" in resp)
 
 def test_autoencoder_training():
-    goal = np.array((0.1, 0.4))
+    agent, ne = make_agent_and_ne()
+    agent.train_autoencoder(ne, n_data = 50)
+    return agent, ne
+
+def test_encoder_online():
+    agent, ne = make_agent_and_ne()
+    res_far = agent.autoencode(ne.get_obs())
+    while not agent.is_in_s_uncertain(ne):
+        action = agent.model_based_policy(ne.get_state(),ne)
+        ne.step(action)
+    res_near = agent.autoencode(ne.get_obs())
+    assert not np.allclose(res_far, res_near)
+    action = agent.random_policy(ne)
+    ne.step(action, dt = 0.5)
+    res_random = agent.autoencode(ne.get_obs())
+    print(res_random, "res_random")
+    print(res_near, "res_near")
+    assert not np.allclose(res_random, res_near)
+
+
+def make_agent_and_ne(goal=None, start = None):
+    goal = np.array((0.1, 0.4)) if goal is None else goal
     obstacles = line_world_obstacles(goal)
     obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
     cov = 0.001
     obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
     agent = Agent(show_training=True)
     agent.belief.in_s_uncertain = obs_prior
-    start = np.array((0.1, 0.1))
+    start = np.array((0.1, 0.1)) if start is None else start
     ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
-    agent.train_autoencoder(ne)
     return agent, ne
-def test_encoder_online():
-    assert(False)
-
-
 #test_model_free()
-test_autoencoder_training()
+test_encoder_online()
