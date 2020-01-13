@@ -316,18 +316,20 @@ class Agent:
         if self.autoencoder is None:
             self.setup_autoencoder(ne.get_obs())
             assert(self.autoencoder) is not None
-        ne.set_autoencoder(self.autoencode)
-        ne.autoencoder = self.autoencode
+        if ne.autoencoder is None:
+            ne.set_autoencoder(self.autoencode)
+            ne.autoencoder = self.autoencode
         if train:
             fn = "models/model1.h5"
             self.mf_policy = PPO2(env=ne, policy=MlpPolicy, n_steps=40, verbose=2, noptepochs=10, learning_rate=3e-4,
-                                  ent_coef=0, gamma=0.1)
+                                  ent_coef=0.1, gamma=0.1)
             if load_model:
                 self.mf_policy.load(fn, env=make_vec_env(lambda: ne))
             else:
                 self.mf_policy.learn(total_timesteps=n_epochs * 40)
                 self.mf_policy.save(fn)
-        return self.mf_policy.step([ne.get_obs()])[0].flatten()
+        encoded_obs = self.autoencode(ne.get_obs())
+        return self.mf_policy.step([encoded_obs], deterministic=True)[0].flatten()
 
     """
 Main control loop,

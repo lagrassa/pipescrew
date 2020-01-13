@@ -129,6 +129,8 @@ class NavEnv:
         done = (self.goal_distance() <= 0.01) or (self.goal_distance() > 0.15)
         rew_scale = 3
         return self.autoencoder(self.get_obs()), -rew_scale * self.goal_distance(), done, {}
+    def rl_obs(self):
+        return np.hstack(self.autoencoder(self.get_obs()), self.get_pos(), self.get_vel())
     def get_state(self):
         return np.hstack([self.get_pos(), self.get_vel()])
     def plot_path(self, path):
@@ -156,7 +158,6 @@ class NavEnv:
     def set_autoencoder(self, fn):
         assert fn is not None
         self.autoencoder = fn
-        print("setting autoencoder")
         auto_shape = fn(self.get_obs())
         self.observation_space = Box(low = -np.inf*np.ones(auto_shape.shape), high = np.inf*np.ones(auto_shape.shape))
 
