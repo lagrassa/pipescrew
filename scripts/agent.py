@@ -328,7 +328,7 @@ class Agent:
             else:
                 self.mf_policy.learn(total_timesteps=n_epochs * 40)
                 self.mf_policy.save(fn)
-        encoded_obs = self.autoencode(ne.get_obs())
+        encoded_obs = ne.rl_obs()
         return self.mf_policy.step([encoded_obs], deterministic=True)[0].flatten()
 
     """
