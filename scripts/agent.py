@@ -269,13 +269,16 @@ class Agent:
         s = np.array([ne.get_pos(), ne.get_vel()]).flatten()
         i = 0
         while i < n_data:
+            import ipdb; ipdb.set_trace()
             if self.is_in_s_uncertain(ne):
                 samples[i, :] = ne.get_obs().flatten()
                 if i % 2 == 0:
                    action = self.random_policy(ne)
+                   dt = ne.dt*3 # to get a bit more movement
                 else:
                     action = self.model_based_policy(s, ne)
-                ne.step(action, dt=1)  # longer
+                    dt = ne.dt
+                ne.step(action, dt=dt)  # longer
                 i += 1
             else:
                 action = self.model_based_policy(s, ne)
@@ -287,8 +290,8 @@ class Agent:
         sample_obs = ne.get_obs()
         image_size = sample_obs.shape[1]
         n_train = int(len(training_data) * 4 / 5.)
-        vae, encoder, decoder, inputs, outputs = make_vae(image_size = image_size)
-        train_vae(vae, training_data, n_train, inputs, outputs, n_epochs=n_epochs)
+        vae, encoder, decoder, inputs, outputs, output_tensors= make_vae(image_size = image_size)
+        train_vae(vae, training_data, n_train, inputs, outputs,output_tensors, n_epochs=n_epochs)
         vae.save_weights(self.vae_fn)
 
     def autoencode(self, obs):
