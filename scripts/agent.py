@@ -269,7 +269,6 @@ class Agent:
         s = np.array([ne.get_pos(), ne.get_vel()]).flatten()
         i = 0
         while i < n_data:
-            import ipdb; ipdb.set_trace()
             if self.is_in_s_uncertain(ne):
                 samples[i, :] = ne.get_obs().flatten()
                 if i % 2 == 0:
@@ -294,13 +293,16 @@ class Agent:
         train_vae(vae, training_data, n_train, inputs, outputs,output_tensors, n_epochs=n_epochs)
         vae.save_weights(self.vae_fn)
 
+    def setup_autoencoder(self, obs):
+        image_size = obs.shape[1]
+        vae, encoder, decoder, inputs, outputs , _= make_vae(image_size = image_size)
+        self.autoencoder = encoder
+        vae.load_weights(self.vae_fn)
+
     def autoencode(self, obs):
         if self.autoencoder is None:
             try:
-                image_size = obs.shape[1]
-                vae, encoder, decoder, inputs, outputs = make_vae(image_size = image_size)
-                self.autoencoder = encoder
-                vae.load_weights(self.vae_fn)
+                self.setup_autoencoder(obs)
             except FileNotFoundError:
                 print("File not found")
         processed_obs = obs.flatten()
@@ -310,9 +312,12 @@ class Agent:
     """
     do RL where the agent collects information about the world to update its model free policy, just only for states that are in s_hat_uncertain
     """
-
-    def model_free_policy(self, obs, ne, n_epochs=1, train=True, load_model=False):
+    def model_free_policy(self, ne, n_epochs=1, train=True, load_model=False):
+        if self.autoencoder is None:
+            self.setup_autoencoder(ne.get_obs())
+            assert(self.autoencoder) is not None
         ne.set_autoencoder(self.autoencode)
+        ne.autoencoder = self.autoencode
         if train:
             fn = "models/model1.h5"
             self.mf_policy = PPO2(env=ne, policy=MlpPolicy, n_steps=40, verbose=2, noptepochs=10, learning_rate=3e-4,
@@ -322,7 +327,7 @@ class Agent:
             else:
                 self.mf_policy.learn(total_timesteps=n_epochs * 40)
                 self.mf_policy.save(fn)
-        return self.mf_policy.step([obs])[0].flatten()
+        return self.mf_policy.step([ne.get_obs()])[0].flatten()
 
     """
 Main control loop,

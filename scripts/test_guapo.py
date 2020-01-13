@@ -65,11 +65,11 @@ def test_model_free():
     start = np.array((0.1, 0.25))
     agent, ne = make_agent_and_ne(goal=goal, start=start)
     nsteps = 40
-    agent.model_free_policy(ne.get_obs(), ne, n_epochs=40, train=True)
+    agent.model_free_policy(ne, n_epochs=40, train=True)
     ne.reset()
     ne.setup_visuals()
     for i in range(nsteps):
-        action = agent.model_free_policy(ne.get_obs(), ne, n_epochs=1, train=False)
+        action = agent.model_free_policy( ne, n_epochs=1, train=False)
         ne.step(action)
         if i % 10 == 0:
             print("action", action)
@@ -105,7 +105,7 @@ def test_collect_autoencoder_data():
 
 def test_autoencoder_training():
     agent, ne = make_agent_and_ne()
-    agent.train_autoencoder(ne, n_data = 50)
+    agent.train_autoencoder(ne, n_data = 80, n_epochs=2000)
     return agent, ne
 
 def test_encoder_online():
@@ -135,5 +135,5 @@ def make_agent_and_ne(goal=None, start = None):
     start = np.array((0.1, 0.1)) if start is None else start
     ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
     return agent, ne
-#test_model_free()
-test_encoder_online()
+test_model_free()
+#test_encoder_online()

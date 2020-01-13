@@ -17,12 +17,14 @@ LIGHT_BLUE = (158, 242, 254)
 
 
 class NavEnv:
-    def __init__(self, start: object, goal: object, slip: object = True, visualize=False, shift: object = None,
+    def __init__(self, start: object, goal: object, slip: object = True, visualize=False,
+                 observation_space=None,
+                 autoencoder = None, shift: object = None,
                  obstacles: object = two_openings_obstacles(),
                  gridsize: object = np.array([300, 400])) -> object:
         self.slip = slip
         self.gridsize = gridsize
-        self.autoencoder = lambda x: x
+        self.autoencoder = autoencoder
         self.m = 1
         self.steps_taken = 0
         self.visualize = visualize
@@ -34,7 +36,7 @@ class NavEnv:
         self.joint = None
         self.obs_width = 12
         obs_size = (2 * self.obs_width + 1) ** 2
-        self.observation_space = Box(low=np.zeros(obs_size), high=np.ones(obs_size) * 255)
+        self.observation_space = Box(low=np.zeros(obs_size), high=np.ones(obs_size) * 255) if observation_space is None else observation_space
         self.observation_space = Box(low=np.zeros(4), high=np.ones(4) * 100)
         self.action_space = Box(low=np.array([0, -2]), high=np.array([0, 2]))
         self.ice_boundary_x = 150. / self.ppm
@@ -142,11 +144,22 @@ class NavEnv:
         return ret
 
     def reset(self):
-        self.__init__(start=self.start, obstacles=self.obstacles, goal=self.goal, gridsize=self.gridsize,
+        assert(self.autoencoder is not None)
+        autoencoder = self.autoencoder
+        self.__init__(start=self.start, obstacles=self.obstacles,
+                      goal=self.goal, gridsize=self.gridsize, autoencoder = autoencoder,
+                      observation_space=self.observation_space,
                       visualize=self.visualize)
-        return self.get_obs()
+        assert(self.autoencoder is not None)
+        return self.autoencoder(self.get_obs())
+
     def set_autoencoder(self, fn):
+        assert fn is not None
         self.autoencoder = fn
+        print("setting autoencoder")
+        auto_shape = fn(self.get_obs())
+        self.observation_space = Box(low = -np.inf*np.ones(auto_shape.shape), high = np.inf*np.ones(auto_shape.shape))
+
     """
     2D occupancy grid @param width units in pix away from the agent
     with the agent centered. 
