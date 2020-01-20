@@ -5,7 +5,7 @@ from sympy.geometry import *
 
 
 class Belief():
-    def __init__(self, mu=None, cov=None, particles = [], walls = []):
+    def __init__(self, mu=None, cov=None, particles = [], walls = [], action=None, siblings=[]):
         n_particles = 5
         if mu is None:
             assert(particles is not None)
@@ -15,12 +15,21 @@ class Belief():
             assert mu is not None
             mvn = multivariate_normal(mean=mu, cov=cov)
             self.particles = [Particle(mvn.rvs()) for n in range(n_particles)]
-        self.mean = mu
-        self.cov = cov
+            mu = mvn.mean
+            cov = mvn.cov
+        self.walls = walls
+        self._mean = mu
+        self._cov = cov
+        self.action = action
+        self.siblings = siblings
     def mean(self):
-        return self.mean
+        return self._mean
+    def siblings(self):
+        return self.siblings()
     def cov(self):
-        return self.cov
+        return self._cov
+    def get_action(self):
+        return self.action
     """
     Check for inconsistencies in the belief state representation,
     - all q must be in free space OR in contact with the same pair of surfaces
@@ -30,10 +39,13 @@ class Belief():
         return self.any_collisions()
     def any_collisions(self):
         return bool(len(self.find_collisions()))
+    """
+    walls that collide with some number of particles
+    """
     def find_collisions(self):
         idxs = []
         for wall, i in zip(self.walls, range(len(self.walls))):
-            parts_in_collision = wall.in_collision()
+            parts_in_collision = wall.in_collision(self)
             for part in parts_in_collision:
                 if wall.endpoints not in part.world_contact_surfaces():
                     idxs.append(i)
@@ -50,6 +62,7 @@ class Wall():
     """
     if there is a 96% probability that the belief will 
     coincide with the line 
+    returns idxs
     """
     def in_collision(self, belief):
         #start integrating from the center out
@@ -59,7 +72,7 @@ class Wall():
             seg = Segment(Point(*belief.mean()), pt)
             inside_wall = bool(len(intersection(seg, self.line)))
             return int(inside_wall)
-        parts_in_collision = [func(part) for part in belief.particles]
+        parts_in_collision = [part for part in belief.particles if func(part.pose)]
         return parts_in_collision
 
 class Particle():
