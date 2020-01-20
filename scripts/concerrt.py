@@ -80,13 +80,29 @@ connect, guarded, or slide.
 def select_action(q_rand, b_near):
     return np.random.choice([Connect, Guarded, Slide])(q_rand, b_near)
 
-
+"""
+Definitely test in_collision
+"""
 def simulate( b_near, u):
     return u.motion_model(b_near)
 def belief_partitioning(b_prime):
-    return NotImplementedError
+    contact_types = {}
+    for particle in b_prime.particles:
+        if frozenset(particle.contacts) not in contact_types:
+            contact_types[frozenset(particle.contacts)] = [particle]
+        else:
+            contact_types[frozenset(particle.contacts)].append(particle)
+    beliefs = []
+    for contact_set in contact_types.keys():
+        beliefs.append(Belief(particles = contact_types[contact_set]))
+    return beliefs
+
+
+'''
+Ensures that the agent is not in collision with a wall
+'''
 def is_valid(belief):
-    return NotImplementedError
+    return belief.is_valid()
 
 
 
@@ -96,9 +112,8 @@ class Connect():
         self.b_near = b_near
     def motion_model(self):
         delta = 0.1
-        distance = np.linalg.norm(self.q_rand-self.b_near)
         diff = self.q_rand - self.b_near
-        mu_shift = diff/np.linalg.norm(diff)*0.1
+        mu_shift = diff/np.linalg.norm(diff)*delta
         new_mu = mu_shift+self.b_near.mean()
         new_cov = 1.05*self.b_near.cov()
         return Belief(new_mu, new_cov)
@@ -109,8 +124,19 @@ class Guarded():
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
+    """
+    Moves until achieves contact
+    """
     def motion_model(self):
-        pass
+        delta = 0.1
+        diff = self.q_rand - self.b_near
+        mu_shift = diff/np.linalg.norm(diff)*delta
+        new_mu = mu_shift+self.b_near.mean()
+        new_cov = 1.05*self.b_near.cov()
+        potential_b =  Belief(new_mu, new_cov)
+        collisions = potential_b.find_collisions()
+        #find collision point and squash there (projection)
+
 
 class Slide():
     def __init__(self, q_rand, b_near):
