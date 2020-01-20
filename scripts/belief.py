@@ -19,6 +19,7 @@ class Belief():
             cov = mvn.cov
         self.walls = walls
         self._mean = mu
+        self.connected = False
         self._cov = cov
         self.action = action
         self.siblings = siblings
