@@ -51,6 +51,7 @@ class Tree:
                 if in_goal_belief(b_dprime, b_goal):
                     b_dprimes_that_worked.append(b_dprime)
                     b_dprime.connected = True
+                    print("somethings in the goal belief")
         return b_dprimes_that_worked, b_dfailures
 
     """
@@ -88,7 +89,7 @@ class Tree:
             if isinstance(child, Tree):
                 child.update_tree()
             else:
-                if child.connected == 0:
+                if child.connected:
                     self.data.connected = True
         return self
 
@@ -100,6 +101,7 @@ class Tree:
         b_prime = simulate(u)
         unconnected_partitions = []
         if is_valid(b_prime):
+            print("valid b_prime")
             b_contingencies = belief_partitioning(b_prime)
             for belief in b_contingencies:
                 self.add_belief(belief)
@@ -170,7 +172,10 @@ def mala_distance(q, belief):
         return np.sqrt(distance)
     else:
         diff = np.matrix(q.pose - belief.mean())
-        return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
+        try:
+            return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
+        except:
+            import ipdb; ipdb.set_trace()
 
 
 def random_config(b_g):
@@ -274,7 +279,7 @@ def in_goal_belief(b_dprime, b_goal):
     all_close = True
     for q in b_dprime.particles:
         distance = mala_distance(q, b_goal)
-        if distance > 2:
+        if distance > 100:
             all_close = False
     return all_close
 """
@@ -294,7 +299,7 @@ class Connect:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
-        self.sigma = 0.03
+        self.sigma = 0.01
 
     def motion_model(self):
         delta = 0.02
@@ -310,7 +315,7 @@ class Guarded:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
-        self.sigma = 0.03
+        self.sigma = 0.01
 
     """
     Moves until achieves contact, should be identical to connect unless a collision is detected. 
@@ -326,12 +331,12 @@ class Guarded:
         else:
             new_particles = []
             for part, potential_part in zip(self.b_near.particles, potential_b.particles):
-                walls_in_contact = [wall for wall, i in zip(potential_b.walls, range(len(potential_b.walls)))
+                walls_in_contact = [potential_b.walls[i] for i in collision_walls_to_parts.keys()
                                     if part in collision_walls_to_parts[i]]
                 if len(walls_in_contact) > 0:
                     new_particles.append(part)
                 else:
-                    new_particles.append(potential_b)
+                    new_particles.append(potential_part)
             return Belief(particles = new_particles, siblings = [], walls = self.b_near.walls)
 
 

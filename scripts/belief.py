@@ -5,14 +5,14 @@ from sympy.geometry import *
 
 
 class Belief():
-    def __init__(self, mu=None, cov=None, particles = [], walls = [], action=None, siblings=[]):
+    def __init__(self, mu=None, cov=None, particles = [], walls = [], action=None, siblings=[], connected = False):
         n_particles = 5
         if mu is None:
             assert(particles is not None)
             assert(isinstance(particles[0], Particle))
             particle_poses = np.vstack([part.pose for part in particles])
             mu = np.mean(particle_poses, axis = 0)
-            cov = np.cov(particle_poses)
+            cov = np.cov(particle_poses.T)
             self.particles = particles
         if len(particles) == 0:
             assert mu is not None
@@ -22,7 +22,7 @@ class Belief():
             cov = mvn.cov
         self.walls = walls
         self._mean = mu
-        self.connected = False
+        self.connected = connected
         self._cov = cov
         self.action = action
         self.siblings = siblings
@@ -40,10 +40,18 @@ class Belief():
     - if there are contacts, the contact must be in a link with a contact sensor (null for pt robot)
     """
     def is_valid(self):
-        return not self.any_collisions()
+        return not self.high_prob_collision()
 
-    def any_collisions(self):
-        return bool(len(self.find_collisions().keys()))
+    def high_prob_collision(self):
+        wall_i_to_colliding_parts = self.find_collisions()
+        p_invalid = 0
+        for part in self.particles:
+            walls_in_contact = [self.walls[i] for i in wall_i_to_colliding_parts.keys()
+                            if part in wall_i_to_colliding_parts[i]]
+            p_collision_given_n_walls = len(walls_in_contact) / len(self.walls)
+            if len(walls_in_contact) > 0:
+                p_invalid += 1./len(self.particles)*p_collision_given_n_walls
+        return p_invalid > 0.96
     """
     walls that collide with some number of particles. 
     A collision is NOT the same as a contact. Contacts are expected and planned for

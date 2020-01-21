@@ -9,8 +9,6 @@ def test_concerrt_trivial_connect():
     action = policy(b0)
     assert(action.b_near == b0)
     next_b = simulate(action) # a little weird to write out but the action has a beginning belief stored in it
-    import ipdb; ipdb.set_trace()
-
     assert(mala_distance(b0,bg) > mala_distance(next_b, bg))
     #should get closer to the goal!!! Even if not in terms of the tree
     print("Test passed")
@@ -23,14 +21,14 @@ def test_guarded():
     bg.connected = True #because it's the goal
     policy = concerrt(b0, bg)
     curr_belief = b0
-    for i in range(3):
+    for i in range(10):
         action = policy(curr_belief)
-        next_b = simulate(action) # a little weird to write out but the action has a beginning belief stored in it
-        assert(mala_distance(b0,bg) > mala_distance(next_b, bg))
+        curr_belief = simulate(action) # a little weird to write out but the action has a beginning belief stored in it
+    assert(mala_distance(b0,bg) > mala_distance(curr_belief, bg))
     #should get closer to the goal!!! Even if not in terms of the tree
     print("Test passed")
 
 
-test_concerrt_trivial_connect()
+test_guarded()
 
 
