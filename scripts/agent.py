@@ -1,7 +1,3 @@
-from keras.losses import mse
-from keras.layers import Lambda, Input, Dense
-from keras.models import Model
-from keras import backend as K
 from numpy.core._multiarray_umath import ndarray
 from stable_baselines.common.cmd_util import make_vec_env
 from stable_baselines.ppo2 import PPO2
@@ -16,7 +12,7 @@ from dmp_traj_cluster import DMPTrajCluster
 from scipy.integrate import solve_ivp
 from rmpflow.rmp import RMPRoot
 from vae import make_vae, train_vae
-from rmpflow.rmp_leaf import CollisionAvoidance, GoalAttractorUni
+from rmpflow.rmp_leaf import GoalAttractorUni
 
 """
 Can make decisions based on a nav_env

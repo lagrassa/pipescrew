@@ -129,9 +129,9 @@ def make_agent_and_ne(goal=None, start = None):
     obstacles = line_world_obstacles(goal)
     obs_center = [obstacles[0].origin[0] + obstacles[0].x / 2.0, obstacles[0].origin[1]]
     cov = 0.001
-    obs_prior = mvn(mean=obs_center, cov=cov)  # prior on the center of the line in xy space
+    goal_prior = mvn(mean=goal, cov=cov)  # prior on the center of the line in xy space
     agent = Agent(show_training=True)
-    agent.belief.in_s_uncertain = obs_prior
+    agent.belief.in_s_uncertain = goal_prior
     start = np.array((0.1, 0.1)) if start is None else start
     ne = NavEnv(start=start, goal=goal, obstacles=obstacles, gridsize=[10 * 50, 10 * 70], visualize=False)
     return agent, ne
