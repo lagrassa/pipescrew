@@ -9,8 +9,11 @@ class Belief():
         n_particles = 5
         if mu is None:
             assert(particles is not None)
-            mu = np.mean(particles, axis = 0)
-            cov = np.cov(particles)
+            assert(isinstance(particles[0], Particle))
+            particle_poses = np.vstack([part.pose for part in particles])
+            mu = np.mean(particle_poses, axis = 0)
+            cov = np.cov(particle_poses)
+            self.particles = particles
         if len(particles) == 0:
             assert mu is not None
             mvn = multivariate_normal(mean=mu, cov=cov)
@@ -37,11 +40,13 @@ class Belief():
     - if there are contacts, the contact must be in a link with a contact sensor (null for pt robot)
     """
     def is_valid(self):
-        return self.any_collisions()
+        return not self.any_collisions()
+
     def any_collisions(self):
         return bool(len(self.find_collisions()))
     """
-    walls that collide with some number of particles
+    walls that collide with some number of particles. 
+    A collision is NOT the same as a contact. Contacts are expected and planned for
     """
     def find_collisions(self):
         idxs = []
