@@ -7,14 +7,14 @@ from belief import Belief, Particle
 """
 
 
-def concerrt(b0, bg):
+def concerrt(b0, bg, gamma = 0.1):
     b_open = [b0]
     b_connected = [bg]
     tree = Tree(b0)
     policy = Policy(tree)
     while policy.prob(tree) < 1:
         print(policy.prob(tree), "P tree")
-        tree, unconnected_partitions = tree.expand(b_connected, bg)
+        tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma)
         policy.update(tree)
         b_open = update(b_open, tree, return_connected=False)
         b_connected = update(b_connected, tree, return_connected=True)
@@ -93,10 +93,10 @@ class Tree:
                     self.data.connected = True
         return self
 
-    def expand(self, b_connected, b_g):
+    def expand(self, b_connected, b_g, gamma):
         q_rand = random_config(b_g)
         b_near = nearest_neighbor(q_rand, self)[0]
-        u = select_action(q_rand, b_near)
+        u = select_action(q_rand, b_near, gamma)
         b_near.action = u
         b_prime = simulate(u)
         unconnected_partitions = []
@@ -234,14 +234,22 @@ connect, guarded, or slide.
 """
 
 
-def select_action(q_rand, b_near):
-    return np.random.choice([Connect, Guarded])(q_rand, b_near)
+def select_action(q_rand, b_near, gamma):
+    walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
+    p_in_contact = 0
+    for part in b_near.particles:
+        p_on_wall = len([wall for wall in b_near.walls if wall in walls_endpoints_to_parts.keys() and part in walls_endpoints_to_parts[wall]])/len(b_near.walls)
+        p_in_contact += (1./len(b_near.particles))*p_on_wall
+    in_contact = p_in_contact >= 0.96
+    if in_contact:
+        return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near)
+    else:
+        return np.random.choice([Connect, Guarded], p=[1-gamma, gamma])(q_rand, b_near)
 
 
 """
 Definitely test in_collision
 """
-
 
 def simulate(u):
     return u.motion_model()
@@ -295,6 +303,13 @@ def propagate_particle(part, q,sigma):
     new_part = Particle(new_pose)
     return new_part
 
+def propagate_particle_by_dir(part, dir):
+    delta = 0.02
+    shift = dir / np.linalg.norm(dir) * delta
+    new_pose = part.pose + shift
+    new_part = Particle(new_pose)
+    return new_part
+
 class Connect:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
@@ -309,6 +324,38 @@ class Connect:
         new_cov = 1.05 * self.b_near.cov()
         moved_particles = [propagate_particle(part, self.q_rand,  self.sigma)  for part in self.b_near.particles]
         return Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
+"""
+Find contacts and update them
+"""
+def update_particle_status(belief):
+    collision_walls_to_parts = belief.find_collisions()
+    for part in belief.particles:
+        walls_in_contact = [belief.walls[i] for i in collision_walls_to_parts.keys()
+                            if part in collision_walls_to_parts[i]]
+        if len(walls_in_contact) > 0:
+            for wall in walls_in_contact:
+                part.contacts.append((None, wall))
+"""
+endpoints of most commonly interacted with surface
+"""
+def most_common_surface(belief):
+    #select surface to move on
+    wall_endpoints_to_parts = get_walls_to_endpoints_to_parts(belief)
+    best_ee = max(wall_endpoints_to_parts.keys(), key=lambda x: len(wall_endpoints_to_parts[x]))
+    return best_ee
+
+def get_walls_to_endpoints_to_parts(belief):
+    wall_endpoints_to_parts = {}
+    for part in belief.particles:
+        walls = part.world_contact_surfaces()
+        for wall in walls:
+            if wall.endpoints not in wall_endpoints_to_parts.keys():
+                wall_endpoints_to_parts[wall] = [part]
+            else:
+                wall_endpoints_to_parts[wall].append(part)
+    return wall_endpoints_to_parts
+
+
 
 
 class Guarded:
@@ -334,17 +381,34 @@ class Guarded:
                 walls_in_contact = [potential_b.walls[i] for i in collision_walls_to_parts.keys()
                                     if part in collision_walls_to_parts[i]]
                 if len(walls_in_contact) > 0:
+                    for wall in walls_in_contact:
+                        part.contacts.append((None, wall))
                     new_particles.append(part)
                 else:
                     new_particles.append(potential_part)
             return Belief(particles = new_particles, siblings = [], walls = self.b_near.walls)
 
-
-
 class Slide:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
+        self.sigma = 0.01
 
+    '''only valid along one contact surface really
+     so pick the one the majority of particles are in'''
     def motion_model(self):
-        pass
+        #update contacts
+        update_particle_status(self.b_near)
+        best_ee = most_common_surface(self.b_near)
+        #direction along best_ee to q
+        forward_particles = [propagate_particle_by_dir(part, best_ee) for part in self.b_near.particles]
+        backward_particles = [propagate_particle_by_dir(part, -best_ee) for part in self.b_near.particles]
+        forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls)
+        backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls)
+        return max([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
+
+
+
+        #take vector of surface
+        #propagate all along that surface
+
