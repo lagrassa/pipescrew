@@ -43,19 +43,23 @@ class Belief():
         return not self.any_collisions()
 
     def any_collisions(self):
-        return bool(len(self.find_collisions()))
+        return bool(len(self.find_collisions().keys()))
     """
     walls that collide with some number of particles. 
     A collision is NOT the same as a contact. Contacts are expected and planned for
+    dict mapping wall with particles
     """
     def find_collisions(self):
-        idxs = []
+        wall_i_to_colliding_parts = {}
         for wall, i in zip(self.walls, range(len(self.walls))):
-            parts_in_collision = wall.in_collision(self)
+            parts_in_collision = wall.get_particles_in_collision(self)
             for part in parts_in_collision:
                 if wall.endpoints not in part.world_contact_surfaces():
-                    idxs.append(i)
-        return idxs
+                    if i not in wall_i_to_colliding_parts.keys():
+                        wall_i_to_colliding_parts[i] = [part]
+                    else:
+                        wall_i_to_colliding_parts[i].append(part)
+        return wall_i_to_colliding_parts
 
 
 class Wall():
@@ -70,7 +74,7 @@ class Wall():
     coincide with the line 
     returns idxs
     """
-    def in_collision(self, belief):
+    def get_particles_in_collision(self, belief):
         #start integrating from the center out
         def func(pt):
             #inside_wall = #on opposite side of wall, best we have now is mean is on the
@@ -80,6 +84,7 @@ class Wall():
             return int(inside_wall)
         parts_in_collision = [part for part in belief.particles if func(part.pose)]
         return parts_in_collision
+
 
 class Particle():
     def __init__(self, pose):

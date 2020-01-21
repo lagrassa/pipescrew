@@ -1,5 +1,5 @@
 import numpy as np
-from belief import Belief
+from belief import Belief, Particle
 
 """
 @param b0 input belief
@@ -123,18 +123,18 @@ class Policy:
 
     """
     tree that represents the most likely belief state we are in
+    that still has an action
     """
 
     def highest_prob_belief(self, belief):
         best_distance = mala_distance(self.tree.data, belief)
         best_child = self.tree.data
-        import ipdb; ipdb.set_trace()
         for child in self.tree.children:
             if isinstance(child, Tree):
                 return self.highest_prob_belief(child)
             else:
                 distance = mala_distance(child, belief)
-                if distance < best_distance:
+                if distance < best_distance and child.get_action() is not None:
                     best_distance = distance
                     best_child = child
         return best_distance, best_child
@@ -166,8 +166,8 @@ def mala_distance(q, belief):
     if isinstance(q, Belief):
         distance = 0
         for particle in q.particles:
-            distance += 1. / len(q.particles) * mala_distance(particle, belief)
-        return distance
+            distance += 1. / len(q.particles) * mala_distance(particle, belief)**2
+        return np.sqrt(distance)
     else:
         diff = np.matrix(q.pose - belief.mean())
         return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
@@ -277,12 +277,24 @@ def in_goal_belief(b_dprime, b_goal):
         if distance > 2:
             all_close = False
     return all_close
+"""
+Moves a particle with an amount of Gaussian noise 
+"""
 
+
+def propagate_particle(part, q,sigma):
+    delta = 0.02
+    diff = q-part.pose
+    shift = diff / np.linalg.norm(diff) * delta
+    new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
+    new_part = Particle(new_pose)
+    return new_part
 
 class Connect:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
+        self.sigma = 0.03
 
     def motion_model(self):
         delta = 0.02
@@ -290,27 +302,38 @@ class Connect:
         mu_shift = diff / np.linalg.norm(diff) * delta
         new_mu = mu_shift + self.b_near.mean()
         new_cov = 1.05 * self.b_near.cov()
-        return Belief(new_mu, new_cov, siblings=[], walls = self.b_near.walls)
+        moved_particles = [propagate_particle(part, self.q_rand,  self.sigma)  for part in self.b_near.particles]
+        return Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
 
 
 class Guarded:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
+        self.sigma = 0.03
 
     """
-    Moves until achieves contact
+    Moves until achieves contact, should be identical to connect unless a collision is detected. 
+    then it turns into a contact. 
     """
 
     def motion_model(self):
-        delta = 0.02
-        diff = self.q_rand - self.b_near
-        mu_shift = diff / np.linalg.norm(diff) * delta
-        new_mu = mu_shift + self.b_near.mean()
-        new_cov = 1.05 * self.b_near.cov()
-        potential_b = Belief(new_mu, new_cov)
-        collisions = potential_b.find_collisions()
-        # find collision point and squash there (projection)
+        moved_particles = [propagate_particle(part, self.q_rand, self.sigma)  for part in self.b_near.particles]
+        potential_b = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
+        collision_walls_to_parts = potential_b.find_collisions()
+        if len(collision_walls_to_parts.keys()) == 0:
+            return potential_b
+        else:
+            new_particles = []
+            for part, potential_part in zip(self.b_near.particles, potential_b.particles):
+                walls_in_contact = [wall for wall, i in zip(potential_b.walls, range(len(potential_b.walls)))
+                                    if part in collision_walls_to_parts[i]]
+                if len(walls_in_contact) > 0:
+                    new_particles.append(part)
+                else:
+                    new_particles.append(potential_b)
+            return Belief(particles = new_particles, siblings = [], walls = self.b_near.walls)
+
 
 
 class Slide:
