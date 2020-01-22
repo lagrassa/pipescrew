@@ -7,7 +7,7 @@ from belief import Belief, Particle
 """
 
 
-def concerrt(b0, bg, gamma = 0.1):
+def concerrt(b0, bg, gamma = 0.8):
     b_open = [b0]
     b_connected = [bg]
     tree = Tree(b0)
@@ -18,8 +18,8 @@ def concerrt(b0, bg, gamma = 0.1):
         policy.update(tree)
         b_open = update(b_open, tree, return_connected=False)
         b_connected = update(b_connected, tree, return_connected=True)
-        print(len(b_connected))
-        print(len(b_open))
+        #print(len(b_connected))
+        #print(len(b_open))
     return policy
 
 
@@ -37,19 +37,31 @@ def update(belief_set, tree, return_connected=None):
 
 
 class Tree:
-    def __init__(self, belief_seed):
-        self.children = []
+    def __init__(self, belief_seed, children = []):
+        self.children = children
         self.data = belief_seed
 
-    def add_belief(self, belief):
-        self.children.append(belief)
+    def add_belief(self,parent_belief, child_belief):
+        if parent_belief == self.data:
+            self.children.append(child_belief)
+        else:
+            for child in self.children:
+                if isinstance(child, Tree):
+                    child.add_belief(parent_belief, child_belief)
+                else:
+                    if parent_belief == child:
+                        new_child = Tree(child, [child_belief])
+                        child_idx = self.children.index(child)
+                        self.children[child_idx] = new_child
+                        print("made a new tree")
+
     def display(self):
         import pygraphviz as pgv
         G = pgv.AGraph(directed=True)
-        parent_name =self.data.mean()
+        parent_name =make_node_name(self.data)
         G.add_node(parent_name, color='blue')
         construct_tree(self, G, parent_name)
-        return G.string()
+        G.write("search.dot")
 
 
     def goal_connect(self, b_connected):
@@ -113,7 +125,7 @@ class Tree:
         if is_valid(b_prime):
             b_contingencies = belief_partitioning(b_prime)
             for belief in b_contingencies:
-                self.add_belief(belief)
+                self.add_belief(b_near, belief)
                 unconnected_partitions += self.goal_connect(b_connected)[1]
         new_tree = self.update_tree()
         return new_tree, unconnected_partitions
@@ -162,7 +174,7 @@ class Policy:
         for child in subtree.children:
             n = len(subtree.children)
             if isinstance(child, Tree):
-                total_p += (1. / n) * self.prob(subtree)
+                total_p += (1. / n) * self.prob(child)
             else:
                 total_p += (1. / n) * int(child.connected)
         return total_p
@@ -173,11 +185,14 @@ class Policy:
 def construct_tree(subtree, G, parent_name):
     for child in subtree.children:
         if isinstance(child, Belief):
-            G.add_node(child.mean())
-            G.add_edge(parent_name, child.mean())
+            G.add_node(make_node_name(child))
+            G.add_edge(parent_name, make_node_name(child))
         else:
-            construct_tree(child, G, child.mean())
+            construct_tree(child, G, make_node_name(child.data))
 
+def make_node_name(belief):
+    stdev = str(np.round(np.std(np.vstack(part.pose for part in belief.particles),axis=0), 3))
+    return str(np.round(belief.mean(),3))+" "+stdev
 """
 q is of either type Particle or Belief comprised of Particles
 """
@@ -198,9 +213,10 @@ def mala_distance(q, belief):
 
 
 def random_config(b_g):
-    p_bg = 0.98  # make higher for more "exploration", basically necessary to get around obstacles
+    p_bg = 0.5  # make higher for more "exploration", basically necessary to get around obstacles
     if np.random.random() < p_bg:
         return b_g.mean()
+    #also consider adding the nearest wall....
     return np.random.uniform(-2, 2, (2,))
 
 
@@ -406,6 +422,7 @@ class Guarded:
                                     if part in collision_walls_to_parts[i]]
                 if len(walls_in_contact) > 0:
                     for wall in walls_in_contact:
+                        print("made a contact")
                         part.contacts.append((None, wall))
                     new_particles.append(part)
                 else:

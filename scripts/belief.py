@@ -41,6 +41,18 @@ class Belief():
     """
     def is_valid(self):
         return not self.high_prob_collision()
+    def visualize(self):
+        import matplotlib.pyplot as plt
+        for wall in self.walls:
+            ee_xs = [ee[0] for ee in wall.endpoints]
+            ee_ys = [ee[1] for ee in wall.endpoints]
+            plt.plot(ee_xs, ee_ys)
+        xs = [part.pose[0] for part in self.particles]
+        ys = [part.pose[1] for part in self.particles]
+        plt.scatter(xs, ys)
+        plt.show()
+
+
 
     def high_prob_collision(self):
         wall_i_to_colliding_parts = self.find_collisions()
