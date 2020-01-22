@@ -12,12 +12,14 @@ def concerrt(b0, bg, gamma = 0.1):
     b_connected = [bg]
     tree = Tree(b0)
     policy = Policy(tree)
-    while policy.prob(tree) < 1:
-        print(policy.prob(tree), "P tree")
+    while policy.prob(tree) < 0.4: #sketchy is fine rn
         tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma)
+        tree.display()
         policy.update(tree)
         b_open = update(b_open, tree, return_connected=False)
         b_connected = update(b_connected, tree, return_connected=True)
+        print(len(b_connected))
+        print(len(b_open))
     return policy
 
 
@@ -41,6 +43,14 @@ class Tree:
 
     def add_belief(self, belief):
         self.children.append(belief)
+    def display(self):
+        import pygraphviz as pgv
+        G = pgv.AGraph(directed=True)
+        parent_name =self.data.mean()
+        G.add_node(parent_name, color='blue')
+        construct_tree(self, G, parent_name)
+        return G.string()
+
 
     def goal_connect(self, b_connected):
         b_dprimes_that_worked = []
@@ -51,7 +61,7 @@ class Tree:
                 if in_goal_belief(b_dprime, b_goal):
                     b_dprimes_that_worked.append(b_dprime)
                     b_dprime.connected = True
-                    print("somethings in the goal belief")
+                    #print("somethings in the goal belief")
         return b_dprimes_that_worked, b_dfailures
 
     """
@@ -101,7 +111,6 @@ class Tree:
         b_prime = simulate(u)
         unconnected_partitions = []
         if is_valid(b_prime):
-            print("valid b_prime")
             b_contingencies = belief_partitioning(b_prime)
             for belief in b_contingencies:
                 self.add_belief(belief)
@@ -119,8 +128,11 @@ class Policy:
     estimates which state we are in and then returns the appropriate action
     """
 
-    def __call__(self, belief):
+    def __call__(self, belief, bg):
+        if in_goal_belief(belief, bg):
+            return NullAction(None, belief)
         _,most_likely_current_tree = self.highest_prob_belief(belief)
+        print(most_likely_current_tree, "most likely node in tree")
         return most_likely_current_tree.get_action()
 
     """
@@ -158,6 +170,13 @@ class Policy:
     def update(self, tree):
         self.tree = tree
 
+def construct_tree(subtree, G, parent_name):
+    for child in subtree.children:
+        if isinstance(child, Belief):
+            G.add_node(child.mean())
+            G.add_edge(parent_name, child.mean())
+        else:
+            construct_tree(child, G, child.mean())
 
 """
 q is of either type Particle or Belief comprised of Particles
@@ -203,8 +222,8 @@ def nearest_neighbor(q_rand, tree, gamma=0.5):
             cand_best_b, score = nearest_neighbor(q_rand, child)
         else:
             b = child
-            cand_best_b, score = gamma * (d_sigma(b) + sum([d_sigma(b2) for b2 in sib(b)])) + (1 - gamma) * d_mu(b,
-                                                                                                                 q_rand)
+            score = gamma * (d_sigma(b) + sum([d_sigma(b2) for b2 in sib(b)])) + (1 - gamma) * d_mu(b,q_rand)
+            cand_best_b = child
         if score < min_score:
             min_score = score
             best_b = cand_best_b
@@ -237,9 +256,12 @@ connect, guarded, or slide.
 def select_action(q_rand, b_near, gamma):
     walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
     p_in_contact = 0
-    for part in b_near.particles:
-        p_on_wall = len([wall for wall in b_near.walls if wall in walls_endpoints_to_parts.keys() and part in walls_endpoints_to_parts[wall]])/len(b_near.walls)
-        p_in_contact += (1./len(b_near.particles))*p_on_wall
+    if len(b_near.walls) > 0:
+        for part in b_near.particles:
+            p_on_wall = len([wall for wall in b_near.walls if wall in walls_endpoints_to_parts.keys() and part in walls_endpoints_to_parts[wall]])/len(b_near.walls)
+            p_in_contact += (1./len(b_near.particles))*p_on_wall
+    if p_in_contact > 0:
+        print(p_in_contact, "p in contact")
     in_contact = p_in_contact >= 0.96
     if in_contact:
         return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near)
@@ -263,9 +285,14 @@ def belief_partitioning(b_prime):
         else:
             contact_types[frozenset(particle.contacts)].append(particle)
     beliefs = []
-    for contact_set in contact_types.keys():
-        siblings = set(contact_types.keys())-contact_set #in all others
-        beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = siblings, walls = b_prime.walls))
+    if len(list(contact_types.keys())) == 1 and len(list(contact_types.keys())[0]) == 0:
+        beliefs.append(Belief(particles=list(contact_types.values())[0], action = b_prime.get_action(), siblings = [], walls = b_prime.walls))
+    else:
+        for contact_set in contact_types.keys():
+            siblings = list(set(contact_types.keys())-contact_set) #in all others
+            if len(siblings) == 0:
+                siblings = [] #fix set weirdness
+            beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = siblings, walls = b_prime.walls))
     return beliefs
 
 
@@ -287,7 +314,7 @@ def in_goal_belief(b_dprime, b_goal):
     all_close = True
     for q in b_dprime.particles:
         distance = mala_distance(q, b_goal)
-        if distance > 100:
+        if distance > 1:
             all_close = False
     return all_close
 """
@@ -314,14 +341,11 @@ class Connect:
     def __init__(self, q_rand, b_near):
         self.q_rand = q_rand
         self.b_near = b_near
-        self.sigma = 0.01
+        self.sigma = 0.0001
 
     def motion_model(self):
         delta = 0.02
         diff = self.q_rand - self.b_near.mean()
-        mu_shift = diff / np.linalg.norm(diff) * delta
-        new_mu = mu_shift + self.b_near.mean()
-        new_cov = 1.05 * self.b_near.cov()
         moved_particles = [propagate_particle(part, self.q_rand,  self.sigma)  for part in self.b_near.particles]
         return Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
 """
@@ -407,8 +431,11 @@ class Slide:
         backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls)
         return max([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
 
+class NullAction:
+    def __init__(self,q_rand, b_near):
+        self.b_near = b_near
+        self.sigma = 0.01
 
-
-        #take vector of surface
-        #propagate all along that surface
+    def motion_model(self):
+        return self.b_near
 

@@ -45,6 +45,8 @@ class Belief():
     def high_prob_collision(self):
         wall_i_to_colliding_parts = self.find_collisions()
         p_invalid = 0
+        if len(self.walls) == 0:
+            return False
         for part in self.particles:
             walls_in_contact = [self.walls[i] for i in wall_i_to_colliding_parts.keys()
                             if part in wall_i_to_colliding_parts[i]]
