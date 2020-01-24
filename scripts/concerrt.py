@@ -393,19 +393,16 @@ Propagates particle but only as far as the belief will go
 def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None):
     new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
     new_part = Particle(new_pose)
-    walls_in_contact = belief.collision_with_particle(new_part, old_belief=old_belief)
+    walls_in_contact = belief.collision_with_particle(old_belief, new_part)
     if len(walls_in_contact) > 0:
         for wall in walls_in_contact:
             print("made a contact")
             new_part.contacts.append((None, wall))
         stopped_pose = np.array(wall.closest_pt(part.pose))
         new_part.pose = stopped_pose
-        return new_part
-    else:
-        return new_part
+    return new_part
 
-
-def propagate_particle_by_dir(part, dir, belief, old_belief = None, delta = 0.02):
+def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta = 0.02):
     shift = (dir / np.linalg.norm(dir)) * delta
     new_part = propagate_particle(part, shift, belief=belief,old_belief = old_belief, sigma=0)
     return new_part
@@ -419,7 +416,7 @@ class Connect:
         self.old_belief = b_old
 
     def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief):
+        while(mala_distance(self.q_rand, self.b_near)) > 1 or self.b_near.high_prob_collision(self.old_belief):
             diff = self.q_rand - self.b_near.mean()
             moved_particles = [propagate_particle_to_q(part, self.q_rand, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.old_belief = self.b_near
@@ -440,9 +437,9 @@ class Guarded:
     """
 
     def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief):
+        while(mala_distance(self.q_rand, self.b_near)) > 1 and not self.b_near.high_prob_collision(self.old_belief, p = 0.9):
             closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
-            moved_particles = [propagate_particle_to_q(part, closest_wall_pt, self.sigma, delta = self.delta) for part in self.b_near.particles]
+            moved_particles = [propagate_particle_to_q(part, closest_wall_pt, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
         return self.b_near
 
@@ -465,8 +462,8 @@ class Slide:
         old_wall = self.b_near.walls[max(wall_i_to_particles.keys(), key = lambda x: len(wall_i_to_particles[x]))]
         #direction along best_ee to q
         while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief, wall = old_wall):
-            forward_particles = [propagate_particle_by_dir(part, forward_dir, self.delta) for part in self.b_near.particles]
-            backward_particles = [propagate_particle_by_dir(part, -forward_dir, self.delta) for part in self.b_near.particles]
+            forward_particles = [propagate_particle_by_dir(part, forward_dir, belief = self.b_near, old_belief = self.old_belief, delta = self.delta) for part in self.b_near.particles]
+            backward_particles = [propagate_particle_by_dir(part, -forward_dir, belief = self.b_near, old_belief = self.old_belief, delta = self.delta) for part in self.b_near.particles]
             forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
             backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls, parent=self.b_near)
             self.b_near =  min([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
