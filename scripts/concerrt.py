@@ -1,5 +1,6 @@
 import numpy as np
 from belief import Belief, Particle
+np.random.seed(17)
 
 """
 @param b0 input belief
@@ -53,7 +54,6 @@ class Tree:
                         new_child = Tree(child, [child_belief])
                         child_idx = self.children.index(child)
                         self.children[child_idx] = new_child
-                        print("made a new tree")
 
     def display(self):
         import pygraphviz as pgv
@@ -118,7 +118,7 @@ class Tree:
     def expand(self, b_connected, b_g, gamma):
         q_rand = random_config(b_g)
         b_near = nearest_neighbor(q_rand, self)[0]
-        u = select_action(q_rand, b_near, gamma)
+        u = select_action(q_rand, b_near, b_near.parent,gamma)
         b_near.action = u
         b_prime = simulate(u)
         unconnected_partitions = []
@@ -183,11 +183,16 @@ class Policy:
         self.tree = tree
 
 def construct_tree(subtree, G, parent_name):
+
     for child in subtree.children:
         if isinstance(child, Belief):
-            G.add_node(make_node_name(child))
+            color = "green" if child.connected else "red"
+            G.add_node(make_node_name(child), color = color)
             G.add_edge(parent_name, make_node_name(child))
         else:
+            color = "green" if child.data.connected else "red"
+            G.add_node(make_node_name(child.data), color = color)
+            G.add_edge(parent_name, make_node_name(child.data))
             construct_tree(child, G, make_node_name(child.data))
 
 def make_node_name(belief):
@@ -204,12 +209,12 @@ def mala_distance(q, belief):
         for particle in q.particles:
             distance += 1. / len(q.particles) * mala_distance(particle, belief)**2
         return np.sqrt(distance)
+    elif isinstance(q, tuple):
+        diff = np.matrix(np.array(q)- belief.mean())
+        return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
     else:
         diff = np.matrix(q.pose - belief.mean())
-        try:
-            return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
-        except:
-            import ipdb; ipdb.set_trace()
+        return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
 
 
 def random_config(b_g):
@@ -217,7 +222,7 @@ def random_config(b_g):
     if np.random.random() < p_bg:
         return b_g.mean()
     #also consider adding the nearest wall....
-    return np.random.uniform(-2, 2, (2,))
+    return np.random.uniform(0, 0.3, (2,))
 
 
 """
@@ -269,7 +274,7 @@ connect, guarded, or slide.
 """
 
 
-def select_action(q_rand, b_near, gamma):
+def select_action(q_rand, b_near,b_old, gamma):
     walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
     p_in_contact = 0
     if len(b_near.walls) > 0:
@@ -280,9 +285,9 @@ def select_action(q_rand, b_near, gamma):
         print(p_in_contact, "p in contact")
     in_contact = p_in_contact >= 0.96
     if in_contact:
-        return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near)
+        return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near, b_old)
     else:
-        return np.random.choice([Connect, Guarded], p=[1-gamma, gamma])(q_rand, b_near)
+        return np.random.choice([Connect, Guarded], p=[1-gamma, gamma])(q_rand, b_near, b_old)
 
 
 """
@@ -302,13 +307,13 @@ def belief_partitioning(b_prime):
             contact_types[frozenset(particle.contacts)].append(particle)
     beliefs = []
     if len(list(contact_types.keys())) == 1 and len(list(contact_types.keys())[0]) == 0:
-        beliefs.append(Belief(particles=list(contact_types.values())[0], action = b_prime.get_action(), siblings = [], walls = b_prime.walls))
+        beliefs.append(Belief(particles=list(contact_types.values())[0], action = b_prime.get_action(), siblings = [], walls = b_prime.walls, parent=b_prime.parent))
     else:
         for contact_set in contact_types.keys():
             siblings = list(set(contact_types.keys())-contact_set) #in all others
             if len(siblings) == 0:
                 siblings = [] #fix set weirdness
-            beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = siblings, walls = b_prime.walls))
+            beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = siblings, walls = b_prime.walls, parent=b_prime.parent))
     return beliefs
 
 
@@ -318,7 +323,8 @@ Ensures that the agent is not in collision with a wall
 
 
 def is_valid(belief):
-    return belief.is_valid()
+    return True
+    #return belief.is_valid()
 
 
 """
@@ -338,37 +344,11 @@ Moves a particle with an amount of Gaussian noise
 """
 
 
-def propagate_particle(part, q,sigma):
-    delta = 0.02
-    diff = q-part.pose
-    shift = diff / np.linalg.norm(diff) * delta
-    new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
-    new_part = Particle(new_pose)
-    return new_part
-
-def propagate_particle_by_dir(part, dir):
-    delta = 0.02
-    shift = dir / np.linalg.norm(dir) * delta
-    new_pose = part.pose + shift
-    new_part = Particle(new_pose)
-    return new_part
-
-class Connect:
-    def __init__(self, q_rand, b_near):
-        self.q_rand = q_rand
-        self.b_near = b_near
-        self.sigma = 0.0001
-
-    def motion_model(self):
-        delta = 0.02
-        diff = self.q_rand - self.b_near.mean()
-        moved_particles = [propagate_particle(part, self.q_rand,  self.sigma)  for part in self.b_near.particles]
-        return Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
 """
 Find contacts and update them
 """
-def update_particle_status(belief):
-    collision_walls_to_parts = belief.find_collisions()
+def update_particle_status(belief, old_belief):
+    collision_walls_to_parts = belief.find_collisions(old_belief)
     for part in belief.particles:
         walls_in_contact = [belief.walls[i] for i in collision_walls_to_parts.keys()
                             if part in collision_walls_to_parts[i]]
@@ -396,57 +376,101 @@ def get_walls_to_endpoints_to_parts(belief):
     return wall_endpoints_to_parts
 
 
+def closest_wall_point(belief, pt):
+    dist_to_walls = [wall.dist_to(pt) for wall in belief.walls]
+    return belief.walls[np.argmin(dist_to_walls)].closest_pt(pt)
+"""
+Moves particle and updates if it's in contact with a wall. 
+"""
+def propagate_particle_to_q(part, q, sigma, delta = 0.02,old_belief =None, belief=None):
+    diff = q-part.pose
+    shift = diff / np.linalg.norm(diff) * delta
+    new_part = propagate_particle(part, shift, sigma=sigma,old_belief=old_belief, belief=belief)
+    return new_part
+"""
+Propagates particle but only as far as the belief will go 
+"""
+def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None):
+    new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
+    new_part = Particle(new_pose)
+    walls_in_contact = belief.collision_with_particle(new_part, old_belief=old_belief)
+    if len(walls_in_contact) > 0:
+        for wall in walls_in_contact:
+            print("made a contact")
+            new_part.contacts.append((None, wall))
+        stopped_pose = np.array(wall.closest_pt(part.pose))
+        new_part.pose = stopped_pose
+        return new_part
+    else:
+        return new_part
+
+
+def propagate_particle_by_dir(part, dir, belief, old_belief = None, delta = 0.02):
+    shift = (dir / np.linalg.norm(dir)) * delta
+    new_part = propagate_particle(part, shift, belief=belief,old_belief = old_belief, sigma=0)
+    return new_part
+
+class Connect:
+    def __init__(self, q_rand, b_near, b_old,  sigma = 0.0001, delta = 0.02):
+        self.q_rand = q_rand
+        self.b_near = b_near
+        self.sigma = sigma
+        self.delta = delta
+        self.old_belief = b_old
+
+    def motion_model(self):
+        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief):
+            diff = self.q_rand - self.b_near.mean()
+            moved_particles = [propagate_particle_to_q(part, self.q_rand, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
+            self.old_belief = self.b_near
+            self.b_near = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
+        return self.b_near
 
 
 class Guarded:
-    def __init__(self, q_rand, b_near):
+    def __init__(self, q_rand, b_near, b_old, sigma = 0.01, delta = 0.02):
         self.q_rand = q_rand
         self.b_near = b_near
-        self.sigma = 0.01
-
+        self.sigma = sigma
+        self.old_belief = b_old
+        self.delta = delta
     """
-    Moves until achieves contact, should be identical to connect unless a collision is detected. 
+    Moves to wall closest to q_rand until achieves contact, should be identical to connect unless a collision is detected. 
     then it turns into a contact. 
     """
 
     def motion_model(self):
-        moved_particles = [propagate_particle(part, self.q_rand, self.sigma)  for part in self.b_near.particles]
-        potential_b = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls)
-        collision_walls_to_parts = potential_b.find_collisions()
-        if len(collision_walls_to_parts.keys()) == 0:
-            return potential_b
-        else:
-            new_particles = []
-            for part, potential_part in zip(self.b_near.particles, potential_b.particles):
-                walls_in_contact = [potential_b.walls[i] for i in collision_walls_to_parts.keys()
-                                    if part in collision_walls_to_parts[i]]
-                if len(walls_in_contact) > 0:
-                    for wall in walls_in_contact:
-                        print("made a contact")
-                        part.contacts.append((None, wall))
-                    new_particles.append(part)
-                else:
-                    new_particles.append(potential_part)
-            return Belief(particles = new_particles, siblings = [], walls = self.b_near.walls)
+        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief):
+            closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
+            moved_particles = [propagate_particle_to_q(part, closest_wall_pt, self.sigma, delta = self.delta) for part in self.b_near.particles]
+            self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
+        return self.b_near
+
+
 
 class Slide:
-    def __init__(self, q_rand, b_near):
+    def __init__(self, q_rand, b_near, b_old, sigma=0.01, delta = 0.02):
         self.q_rand = q_rand
         self.b_near = b_near
-        self.sigma = 0.01
+        self.sigma = sigma
+        self.delta = delta
+        self.old_belief= b_old
 
     '''only valid along one contact surface really
      so pick the one the majority of particles are in'''
     def motion_model(self):
-        #update contacts
-        update_particle_status(self.b_near)
-        best_ee = most_common_surface(self.b_near)
+        best_ees = np.array(most_common_surface(self.b_near).endpoints)
+        forward_dir = best_ees[0]-best_ees[1]
+        wall_i_to_particles = self.b_near.find_collisions(self.old_belief) #wall majority of particles are in contact with
+        old_wall = self.b_near.walls[max(wall_i_to_particles.keys(), key = lambda x: len(wall_i_to_particles[x]))]
         #direction along best_ee to q
-        forward_particles = [propagate_particle_by_dir(part, best_ee) for part in self.b_near.particles]
-        backward_particles = [propagate_particle_by_dir(part, -best_ee) for part in self.b_near.particles]
-        forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls)
-        backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls)
-        return max([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
+        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief, wall = old_wall):
+            forward_particles = [propagate_particle_by_dir(part, forward_dir, self.delta) for part in self.b_near.particles]
+            backward_particles = [propagate_particle_by_dir(part, -forward_dir, self.delta) for part in self.b_near.particles]
+            forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
+            backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls, parent=self.b_near)
+            self.b_near =  min([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
+        return self.b_near
 
 class NullAction:
     def __init__(self,q_rand, b_near):
