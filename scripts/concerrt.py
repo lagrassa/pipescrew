@@ -8,13 +8,13 @@ np.random.seed(17)
 """
 
 
-def concerrt(b0, bg, gamma = 0.8):
+def concerrt(b0, bg, gamma = 0.8, p_bg = 0.5):
     b_open = [b0]
     b_connected = [bg]
     tree = Tree(b0)
     policy = Policy(tree)
     while policy.prob(tree) < 0.4: #sketchy is fine rn
-        tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma)
+        tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma, p_bg=p_bg)
         tree.display()
         policy.update(tree)
         b_open = update(b_open, tree, return_connected=False)
@@ -115,8 +115,8 @@ class Tree:
                     self.data.connected = True
         return self
 
-    def expand(self, b_connected, b_g, gamma):
-        q_rand = random_config(b_g)
+    def expand(self, b_connected, b_g, gamma, p_bg=0.5):
+        q_rand = random_config(b_g, p_bg=p_bg)
         b_near = nearest_neighbor(q_rand, self)[0]
         u = select_action(q_rand, b_near, b_near.parent,gamma)
         b_near.action = u
@@ -210,15 +210,16 @@ def mala_distance(q, belief):
             distance += 1. / len(q.particles) * mala_distance(particle, belief)**2
         return np.sqrt(distance)
     elif isinstance(q, tuple):
-        diff = np.matrix(np.array(q)- belief.mean())
-        return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
-    else:
-        diff = np.matrix(q.pose - belief.mean())
-        return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
+        q = np.array(q)
+    elif isinstance(q, Particle):
+        q = q.pose
+    diff = np.matrix(np.array(q)- belief.mean())
+    if np.linalg.det(belief.cov()) < 1e-12:
+        return np.linalg.norm(diff)
+    return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
 
 
-def random_config(b_g):
-    p_bg = 0.5  # make higher for more "exploration", basically necessary to get around obstacles
+def random_config(b_g, p_bg = 0.5):
     if np.random.random() < p_bg:
         return b_g.mean()
     #also consider adding the nearest wall....
@@ -228,8 +229,6 @@ def random_config(b_g):
 """
 b nearest to T in the direction of q_rand
 """
-
-
 def nearest_neighbor(q_rand, tree, gamma=0.5):
     if not isinstance(tree.data, Tree):
         min_score = gamma * (d_sigma(tree.data) + sum([d_sigma(b2) for b2 in sib(tree.data)])) + (1 - gamma) * d_mu(
@@ -384,6 +383,8 @@ Moves particle and updates if it's in contact with a wall.
 """
 def propagate_particle_to_q(part, q, sigma, delta = 0.02,old_belief =None, belief=None):
     diff = q-part.pose
+    if np.linalg.norm(diff) == 0:
+        return part #we're already there
     shift = diff / np.linalg.norm(diff) * delta
     new_part = propagate_particle(part, shift, sigma=sigma,old_belief=old_belief, belief=belief)
     return new_part
@@ -396,7 +397,6 @@ def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None):
     walls_in_contact = belief.collision_with_particle(old_belief, new_part)
     if len(walls_in_contact) > 0:
         for wall in walls_in_contact:
-            print("made a contact")
             new_part.contacts.append((None, wall))
         stopped_pose = np.array(wall.closest_pt(part.pose))
         new_part.pose = stopped_pose
@@ -416,7 +416,9 @@ class Connect:
         self.old_belief = b_old
 
     def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 1 or self.b_near.high_prob_collision(self.old_belief):
+        while(mala_distance(self.q_rand, self.b_near)) > 1:
+            if self.b_near.high_prob_collision(self.old_belief):
+                break
             diff = self.q_rand - self.b_near.mean()
             moved_particles = [propagate_particle_to_q(part, self.q_rand, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.old_belief = self.b_near

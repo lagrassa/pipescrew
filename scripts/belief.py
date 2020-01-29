@@ -6,7 +6,7 @@ from sympy.geometry import *
 
 class Belief():
     def __init__(self, mu=None, cov=None, particles = [], walls = [], action=None, siblings=[], parent=None, connected = False):
-        n_particles = 15
+        n_particles = 5
         if mu is None:
             assert(particles is not None)
             assert(isinstance(particles[0], Particle))
@@ -21,6 +21,8 @@ class Belief():
             mu = mvn.mean
             cov = mvn.cov
         self.walls = walls
+        if parent is None:
+            parent = self
         self.parent = parent
         self._mean = mu
         self.connected = connected
