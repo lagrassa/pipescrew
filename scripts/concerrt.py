@@ -381,11 +381,9 @@ def closest_wall_point(belief, pt):
 """
 Moves particle and updates if it's in contact with a wall. 
 """
-def propagate_particle_to_q(part, q, sigma, delta = 0.02,old_belief =None, belief=None):
-    diff = q-part.pose
-    if np.linalg.norm(diff) == 0:
+def propagate_particle_to_q(part, sigma=None, shift=None, old_belief =None, belief=None):
+    if np.linalg.norm(shift) == 0:
         return part #we're already there
-    shift = diff / np.linalg.norm(diff) * delta
     new_part = propagate_particle(part, shift, sigma=sigma,old_belief=old_belief, belief=belief)
     return new_part
 """
@@ -408,7 +406,7 @@ def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta
     return new_part
 
 class Connect:
-    def __init__(self, q_rand, b_near, b_old,  sigma = 0.0001, delta = 0.02):
+    def __init__(self, q_rand, b_near, b_old,  sigma = 0.0001, delta = 0.05):
         self.q_rand = q_rand
         self.b_near = b_near
         self.sigma = sigma
@@ -420,14 +418,15 @@ class Connect:
             if self.b_near.high_prob_collision(self.old_belief):
                 break
             diff = self.q_rand - self.b_near.mean()
-            moved_particles = [propagate_particle_to_q(part, self.q_rand, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
+            shift = diff / np.linalg.norm(diff) * self.delta
+            moved_particles = [propagate_particle_to_q(part, shift =shift, sigma=self.sigma,  belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.old_belief = self.b_near
             self.b_near = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
         return self.b_near
 
 
 class Guarded:
-    def __init__(self, q_rand, b_near, b_old, sigma = 0.01, delta = 0.02):
+    def __init__(self, q_rand, b_near, b_old, sigma = 0.0001, delta = 0.05):
         self.q_rand = q_rand
         self.b_near = b_near
         self.sigma = sigma
@@ -441,7 +440,9 @@ class Guarded:
     def motion_model(self):
         while(mala_distance(self.q_rand, self.b_near)) > 1 and not self.b_near.high_prob_collision(self.old_belief, p = 0.9):
             closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
-            moved_particles = [propagate_particle_to_q(part, closest_wall_pt, self.sigma, delta = self.delta, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
+            diff = closest_wall_pt - self.b_near.mean()
+            shift = diff / np.linalg.norm(diff) * self.delta
+            moved_particles = [propagate_particle_to_q(part, sigma=self.sigma, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
         return self.b_near
 

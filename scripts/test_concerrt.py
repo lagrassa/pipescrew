@@ -20,7 +20,7 @@ def test_guarded_close():
     backboard =  Wall((0.05, 0.12), (0.3, 0.12))
     sideboard =  Wall((0.11, 0.12), (0.11, 0))
     #make the covariance vertical so hitting the wall *does* squish it.
-    vert_cov_matrix = np.matrix([0.000001, 0,
+    vert_cov_matrix = np.matrix([0.0000005, 0,
                          0, 0.00005]).reshape((2, 2))
     b0 = Belief(mu=(0.1,0.08), cov = vert_cov_matrix, walls = [backboard, sideboard])
     bg = Belief(mu=(0.1,0.1), cov = 0.0001, walls = [backboard, sideboard])
@@ -54,7 +54,7 @@ def test_guarded_far():
     #should get closer to the goal!!! Even if not in terms of the tree
     print("Test passed")
 #test_concerrt_trivial_connect()
-test_guarded_close()
-#test_guarded_far()
+#test_guarded_close()
+test_guarded_far()
 
 

@@ -63,7 +63,7 @@ class Belief():
 
     def high_prob_collision(self, old_belief, p = 0.96, wall = None):
         wall_i_to_colliding_parts = self.find_collisions(old_belief)
-        p_invalid = 0
+        p_collision = 0
         if len(self.walls) == 0:
             return False
         for part in self.particles:
@@ -74,10 +74,10 @@ class Belief():
                 walls_in_contact = [self.walls[i] for i in wall_i_to_colliding_parts.keys()
                                     if part in wall_i_to_colliding_parts[i] and self.walls[i] == wall]
 
-        p_collision_given_n_walls = len(walls_in_contact) / len(self.walls)
-        if len(walls_in_contact) > 0:
-            p_invalid += 1./len(self.particles)*p_collision_given_n_walls
-        return p_invalid > p
+            p_collision_given_n_walls = int(len(walls_in_contact) > 0 )
+            if len(walls_in_contact) > 0:
+                p_collision += 1./len(self.particles)*p_collision_given_n_walls
+        return p_collision > p
     """
     walls that collide with some number of particles. 
     A collision is NOT the same as a contact. Contacts are expected and planned for
