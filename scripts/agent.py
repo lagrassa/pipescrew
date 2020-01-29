@@ -49,10 +49,13 @@ class Agent:
                 return
         print("Achieved goal using MB policy")
     def off_path(self, expected_next, obs):
-        """
-        True if observed a low probability event
-        """
-        return False
+        diff = np.matrix(np.array(obs) - expected_next.mean())
+        if np.linalg.det(expected_next.cov()) < 1e-12:
+            dist = np.linalg.norm(diff)
+        else:
+            dist = np.sqrt(diff * np.linalg.inv(expected_next.cov()) * diff.T).item()
+        threshold = 0.5
+        return dist > threshold
     """
     Executes action, True if succeeds ands False if not
     actions are high level, comes with the controller that agent has
