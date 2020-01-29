@@ -22,7 +22,7 @@ Can make decisions based on a nav_env
 class Agent:
     def __init__(self, show_training=False):
         self.history = History()
-        self.belief = Belief()
+        self.belief = Belief(mu = [0,0], cov=1) #we know nothing
         self.autoencoder = None
         self.show_training = show_training
         self.goal_threshold = 0.02
@@ -32,6 +32,37 @@ class Agent:
         self.rmp = None
         self.cluster_planning_history = self.dmp_cluster_planning_history
         self.pd_errors = []
+    """
+    Given a concerrt policy, follows it until it detects that there's a model error
+    """
+    def follow_policy(self, policy, ne, goal_belief):
+        """
+        Selects actions and executes them
+        :return:
+        """
+        while not ne.goal_condition_met():
+            curr_belief = self.get_curr_belief(ne)
+            action = policy(curr_belief, goal_belief) # policy doesn't care about velocity
+            success = self.execute_action(action)
+            if not success:
+                print("Detected model error")
+                return
+        print("Achieved goal using MB policy")
+    def off_path(self, expected_next, obs):
+        """
+        True if observed a low probability event
+        """
+        return False
+    """
+    Executes action, True if succeeds ands False if not
+    actions are high level, comes with the controller that agent has
+    """
+    def execute_action(self, ne, action):
+        #move in delta size steps toward q_rand.
+        ext_force = ne.ext_mu*ne.mass
+        control, expected_next = action.get_control(ne.get_obs_low_dim(), ne.dt, ext_force)
+        ne.step(control, rl=False)
+        return not self.off_path(expected_next, ne.get_obs_low_dim())
 
     def follow_path(self, ne, path, force=None):
         kp = 10  # 50

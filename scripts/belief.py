@@ -94,6 +94,7 @@ class Belief():
                     else:
                         wall_i_to_colliding_parts[i].append(part)
         return wall_i_to_colliding_parts
+
     def collision_with_particle(self, old_belief, part):
         colliding_walls = []
         for wall in self.walls:

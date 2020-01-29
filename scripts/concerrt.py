@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats import multivariate_normal
 from belief import Belief, Particle
 np.random.seed(17)
 
@@ -412,6 +413,25 @@ class Connect:
         self.sigma = sigma
         self.delta = delta
         self.old_belief = b_old
+    '''
+    Moves by delta toward self.q_rand
+    '''
+    def get_control(self, state,dt, ext_force_mag):
+        diff = self.q_rand - state[0:2]
+        dir = diff/np.linalg.norm(diff)
+        ext_force = -dir*ext_force_mag #really only works for opposing force
+        control = (dir*self.delta-state[2:]*dt)/(dt**2) + ext_force
+        k = 1
+        d = 0.1
+        #control = k*(self.q_rand-state[:2])+d*(0-state[2:])-ext_force
+        expected_next_mu = state[0:2]+(control-ext_force)*dt**2+state[2:]*dt
+        expected_next = multivariate_normal(mean = expected_next_mu, cov = self.sigma**2)
+        return control, expected_next
+
+
+
+
+
 
     def motion_model(self):
         while(mala_distance(self.q_rand, self.b_near)) > 1:
