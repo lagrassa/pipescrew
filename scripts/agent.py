@@ -32,6 +32,8 @@ class Agent:
         self.rmp = None
         self.cluster_planning_history = self.dmp_cluster_planning_history
         self.pd_errors = []
+    def get_curr_belief(self, ne):
+        return Belief(mu=ne.get_pos(), cov = 0.001)
     """
     Given a concerrt policy, follows it until it detects that there's a model error
     """
@@ -43,17 +45,17 @@ class Agent:
         while not ne.goal_condition_met():
             curr_belief = self.get_curr_belief(ne)
             action = policy(curr_belief, goal_belief) # policy doesn't care about velocity
-            success = self.execute_action(action)
+            success = self.execute_action(ne, action)
             if not success:
                 print("Detected model error")
                 return
         print("Achieved goal using MB policy")
     def off_path(self, expected_next, obs):
-        diff = np.matrix(np.array(obs) - expected_next.mean())
-        if np.linalg.det(expected_next.cov()) < 1e-12:
+        diff = np.matrix(np.array(obs[0:2]) - expected_next.mean)
+        if np.linalg.det(expected_next.cov) < 1e-12:
             dist = np.linalg.norm(diff)
         else:
-            dist = np.sqrt(diff * np.linalg.inv(expected_next.cov()) * diff.T).item()
+            dist = np.sqrt(diff * np.linalg.inv(expected_next.cov) * diff.T).item()
         threshold = 0.5
         return dist > threshold
     """

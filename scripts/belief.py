@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import multivariate_normal
-from sympy import *
+import shapely.geometry as sg
 from sympy.geometry import *
 
 
@@ -98,8 +98,12 @@ class Belief():
     def collision_with_particle(self, old_belief, part):
         colliding_walls = []
         for wall in self.walls:
-            if wall.is_particle_in_collision(part.pose, old_belief):
-                if wall.endpoints not in part.world_contact_surfaces():
+            if isinstance(part, Particle):
+                pose = part.pose
+            else:
+                pose = part
+            if wall.is_particle_in_collision(pose, old_belief):
+                if not isinstance(part, Particle) or wall.endpoints not in part.world_contact_surfaces():
                     colliding_walls.append(wall)
         return colliding_walls
 
@@ -111,6 +115,7 @@ class Wall():
     """
     def __init__(self, e1, e2):
         self.line = Segment(Point(*e1), Point(*e2))
+        self.sg_line = sg.LineString([e1, e2])
         self.endpoints = (e1, e2)
     """
     if there is a 96% probability that the belief will 
@@ -123,15 +128,21 @@ class Wall():
         return parts_in_collision
 
     def is_particle_in_collision(self, pt, old_belief):
-        seg = Segment(Point(*old_belief.mean()), pt)
-        inside_wall = bool(len(intersection(seg, self.line)))
+        seg = sg.LineString([old_belief.mean(), pt])
+        #inside_wall = bool(len(intersection(seg, self.line)))
+        intersections = seg.intersection(self.sg_line)
+        inside_wall = bool(len(intersections.coords))
         return int(inside_wall)
 
     def dist_to(self, pt):
-        return self.line.distance(Point2D(pt))
-    def closest_pt(self, pt):
-        perp_line = self.line.perpendicular_line(pt)
-        intersecting_pts = intersection(perp_line, self.line)
+        return self.sg_line.distance(Point2D(pt))
+
+    def closest_pt(self, pt, dir = None):
+        if dir is None:
+            projected_line = self.line.perpendicular_line(pt)
+        else:
+            projected_line = Line(pt, pt+dir)
+        intersecting_pts = intersection(projected_line, self.line)
         if len(intersecting_pts) == 0:
             return self.endpoints[np.argmin([Point2D(ep).distance(pt) for ep in self.endpoints])]
         else:

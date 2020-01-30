@@ -9,13 +9,13 @@ np.random.seed(17)
 """
 
 
-def concerrt(b0, bg, gamma = 0.8, p_bg = 0.5):
+def concerrt(b0, bg, gamma = 0.8, p_bg = 0.5, delta=0.03):
     b_open = [b0]
     b_connected = [bg]
     tree = Tree(b0)
     policy = Policy(tree)
-    while policy.prob(tree) < 0.4: #sketchy is fine rn
-        tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma, p_bg=p_bg)
+    while policy.prob(tree) < 0.1: #sketchy is fine rn
+        tree, unconnected_partitions = tree.expand(b_connected, bg, gamma=gamma, p_bg=p_bg, delta = delta)
         tree.display()
         policy.update(tree)
         b_open = update(b_open, tree, return_connected=False)
@@ -62,7 +62,7 @@ class Tree:
         parent_name =make_node_name(self.data)
         G.add_node(parent_name, color='blue')
         construct_tree(self, G, parent_name)
-        G.write("search.dot")
+        G.write("/home/lagrassa/git/pipescrew/scripts/search.dot")
 
 
     def goal_connect(self, b_connected):
@@ -116,10 +116,10 @@ class Tree:
                     self.data.connected = True
         return self
 
-    def expand(self, b_connected, b_g, gamma, p_bg=0.5):
+    def expand(self, b_connected, b_g, gamma, p_bg=0.5,delta = 0.04):
         q_rand = random_config(b_g, p_bg=p_bg)
         b_near = nearest_neighbor(q_rand, self)[0]
-        u = select_action(q_rand, b_near, b_near.parent,gamma)
+        u = select_action(q_rand, b_near, b_near.parent,gamma, delta = delta)
         b_near.action = u
         b_prime = simulate(u)
         unconnected_partitions = []
@@ -243,7 +243,10 @@ def nearest_neighbor(q_rand, tree, gamma=0.5):
             cand_best_b, score = nearest_neighbor(q_rand, child)
         else:
             b = child
-            score = gamma * (d_sigma(b) + sum([d_sigma(b2) for b2 in sib(b)])) + (1 - gamma) * d_mu(b,q_rand)
+            try:
+                score = gamma * (d_sigma(b) + sum([d_sigma(b2) for b2 in sib(b)])) + (1 - gamma) * d_mu(b,q_rand)
+            except:
+                import ipdb; ipdb.set_trace()
             cand_best_b = child
         if score < min_score:
             min_score = score
@@ -274,7 +277,7 @@ connect, guarded, or slide.
 """
 
 
-def select_action(q_rand, b_near,b_old, gamma):
+def select_action(q_rand, b_near,b_old, gamma, delta = 0.04):
     walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
     p_in_contact = 0
     if len(b_near.walls) > 0:
@@ -285,9 +288,9 @@ def select_action(q_rand, b_near,b_old, gamma):
         print(p_in_contact, "p in contact")
     in_contact = p_in_contact >= 0.96
     if in_contact:
-        return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near, b_old)
+        return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near, b_old, delta = delta)
     else:
-        return np.random.choice([Connect, Guarded], p=[1-gamma, gamma])(q_rand, b_near, b_old)
+        return np.random.choice([Connect, Guarded], p=[1-gamma, gamma])(q_rand, b_near, b_old, delta=delta)
 
 
 """
@@ -310,10 +313,13 @@ def belief_partitioning(b_prime):
         beliefs.append(Belief(particles=list(contact_types.values())[0], action = b_prime.get_action(), siblings = [], walls = b_prime.walls, parent=b_prime.parent))
     else:
         for contact_set in contact_types.keys():
-            siblings = list(set(contact_types.keys())-contact_set) #in all others
-            if len(siblings) == 0:
-                siblings = [] #fix set weirdness
-            beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = siblings, walls = b_prime.walls, parent=b_prime.parent))
+            beliefs.append(Belief(particles=contact_types[contact_set], action = b_prime.get_action(), siblings = [], walls = b_prime.walls, parent=b_prime.parent))
+        for belief in beliefs:
+            siblings = []
+            for other_belief in beliefs:
+                if belief != other_belief:
+                    siblings.append(other_belief)
+            belief.siblings = siblings
     return beliefs
 
 
@@ -417,20 +423,9 @@ class Connect:
     Moves by delta toward self.q_rand
     '''
     def get_control(self, state,dt, ext_force_mag):
-        diff = self.q_rand - state[0:2]
-        dir = diff/np.linalg.norm(diff)
-        ext_force = -dir*ext_force_mag #really only works for opposing force
-        control = (dir*self.delta-state[2:]*dt)/(dt**2) + ext_force
-        k = 1
-        d = 0.1
-        #control = k*(self.q_rand-state[:2])+d*(0-state[2:])-ext_force
-        expected_next_mu = state[0:2]+(control-ext_force)*dt**2+state[2:]*dt
-        expected_next = multivariate_normal(mean = expected_next_mu, cov = self.sigma**2)
-        return control, expected_next
-
-
-
-
+        q = self.q_rand
+        control, expected = get_control(q, state,dt,ext_force_mag, self.delta, self.sigma, self.old_belief)
+        return control, expected
 
 
     def motion_model(self):
@@ -442,8 +437,25 @@ class Connect:
             moved_particles = [propagate_particle_to_q(part, shift =shift, sigma=self.sigma,  belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
             self.old_belief = self.b_near
             self.b_near = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
+            #print(self.b_near.mean(), self.q_rand)
         return self.b_near
 
+def get_control(q, state,dt,ext_force_mag, delta, sigma, belief):
+    diff = q - state[0:2]
+    dir = diff/np.linalg.norm(diff)
+    ext_force = -dir*ext_force_mag #really only works for opposing force
+    control = (dir*delta-state[2:]*dt)/(dt**2) + ext_force
+    k = 1
+    d = 0.1
+    #control = k*(self.q_rand-state[:2])+d*(0-state[2:])-ext_force
+    expected_next_mu = state[0:2]+(control-ext_force)*dt**2+state[2:]*dt
+    colliding_walls = belief.collision_with_particle(belief.parent, expected_next_mu)
+    if len(colliding_walls) == 0:
+        expected_next = multivariate_normal(mean = expected_next_mu, cov = sigma**2)
+    else:
+        collide_pt = colliding_walls[0].closest_pt(state[0:2], dir=dir)
+        expected_next = multivariate_normal(mean = collide_pt, cov = sigma**2)
+    return control, expected_next
 
 class Guarded:
     def __init__(self, q_rand, b_near, b_old, sigma = 0.0001, delta = 0.05):
@@ -466,6 +478,10 @@ class Guarded:
             self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
         return self.b_near
 
+    def get_control(self, state,dt, ext_force_mag):
+        q = self.q_rand
+        control, expected = get_control(q, state,dt,ext_force_mag, self.delta, self.sigma, self.old_belief)
+        return control, expected
 
 
 class Slide:
