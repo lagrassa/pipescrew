@@ -31,7 +31,7 @@ class PegWorld():
             self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
             set_point(self.robot, (-0.4,0,0.005))
             start_joints = (0.09186411075857098, 0.02008522792588543, 0.03645461729775788, -1.9220854528910314, 0.213232566443952983, 1.647271913704007, 0.0, 0.0, 0.0)
-            self.grasp_joint = 8 
+            self.grasp_joint = 9
             p.changeDynamics(self.robot, -1, mass=0)
             ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot), start_joints)
         else:
@@ -93,14 +93,15 @@ class PegWorld():
         self.grasp = grasp_pose
         attachment = ut.Attachment(self.robot, self.grasp_joint, grasp_pose, self.shape_name_to_shape[shape_name])
         new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
-        ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
+        #ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
+        attachment.assign()
         self.in_hand = [attachment]
 
     def detach_shape(self, shape_name):
         self.in_hand = []
 
 if __name__ == "__main__":
-    pw = PegWorld(visualize=False, handonly = False)
-    pw.attach_shape('circle', (np.array([0,0,0.12]), np.array([1,0,0,0])))
+    pw = PegWorld(visualize=True, handonly = False)
+    pw.attach_shape('circle', (np.array([0,0,0.05]), np.array([1,0,0,0])))
     traj = pw.make_traj(np.array([0,0.05,0.3]))
     print("trajectory", traj)
