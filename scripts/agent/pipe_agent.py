@@ -1,7 +1,7 @@
 from history import History
 import numpy as np
 from motion_planners.rrt_connect import birrt
-from dmp_traj_cluster import DMPTrajCluster
+from modelfree.dmp_traj_cluster import DMPTrajCluster
 from screwpipe import PipeGraspEnv
 """
 Can make decisions based on a nav_env

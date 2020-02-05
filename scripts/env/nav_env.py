@@ -40,15 +40,19 @@ class NavEnv:
         self.observation_space = Box(low=np.zeros(4), high=np.ones(4) * 100)
         self.action_space = Box(low=np.array([0, -2]), high=np.array([0, 2]))
         self.ice_boundary_x = 150. / self.ppm
+
         self.quicksand_ring = Quicksand((0.4, 0.4), 0.00)
         self.goal = goal
         self.start = start
+        self.max_force = 4
+        self.mass = 1
         self.world = b2World(gravity=(0, 0), doSleep=True)
         self.robot_width = 0.01
         self.agent = self.world.CreateDynamicBody(
             position=self.start,
             fixtures=b2FixtureDef(
                 shape=b2PolygonShape(box=(0.01, 0.01)),
+                density=self.mass/(0.01*0.01)
             )
         )
         self.ground = self.world.CreateStaticBody(
@@ -91,6 +95,7 @@ class NavEnv:
     def check_and_set_mu(self, dirty_bit=False):
         old_pos = np.array(self.agent.position.tuple)
         no_ice_mu = 0.6
+        self.ext_mu = no_ice_mu
         ice_mu = 0.02
         quicksand_mu = 3
         if old_pos[0] < self.ice_boundary_x:
@@ -113,12 +118,13 @@ class NavEnv:
     Rolls dynamical system 1 dt according to x'', y''
     implements openai gym interface
     '''
-
-    def step(self, action, dt = None):
+    def step(self, action, dt = None, rl=True):
         old_pos = np.array(self.agent.position.tuple)
         if dt is None: dt = self.dt
         self.pos_history.append(old_pos)
         self.check_and_set_mu()
+        if np.linalg.norm(action) > self.max_force:
+            action = (action/ np.linalg.norm(action))*self.max_force
         move = action
         self.agent.ApplyForceToCenter(force=move.tolist(), wake=True)
         self.world.Step(dt, 6, 2)
@@ -128,7 +134,11 @@ class NavEnv:
             self.render()
         done = (self.goal_distance() <= 0.01) or (self.goal_distance() > 0.15)
         rew_scale = 3
-        return self.rl_obs(), -rew_scale * self.goal_distance(), done, {}
+        if rl:
+            return self.rl_obs(), -rew_scale * self.goal_distance(), done, {}
+        else:
+            return self.get_obs_low_dim() -rew_scale * self.goal_distance(), done, {}
+
     def rl_obs(self):
         #return np.hstack([self.autoencoder(self.get_obs()), self.get_pos(), self.get_vel()]).flatten()
         return np.hstack([self.autoencoder(self.get_obs()), self.get_vel()]).flatten()
@@ -162,12 +172,14 @@ class NavEnv:
         obs_shape = self.rl_obs()
         self.observation_space = Box(low = -np.inf*np.ones(obs_shape.shape), high = np.inf*np.ones(obs_shape.shape))
 
+    def get_obs_low_dim(self):
+     return np.array([self.agent.position, self.agent.GetLinearVelocityFromLocalPoint((0, 0))]).flatten()
+
     """
     2D occupancy grid @param width units in pix away from the agent
     with the agent centered. 
     
     """
-
     def get_obs(self):
         self.belief_screen.fill((255,255,255))
         self.render(belief_only=True, flip=True)
@@ -227,7 +239,7 @@ class NavEnv:
             pygame.display.flip()
 
     def collision_fn(self, pt):
-        ret = not (not np.array([obs.in_collision(pt) for obs in self.obstacles]).any() and not (
+        ret = not (not np.array([obs.get_particles_in_collision(pt) for obs in self.obstacles]).any() and not (
                 pt > self.gridsize / self.ppm).any()) or (pt < 0).any()
         return ret
 

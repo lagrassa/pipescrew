@@ -6,12 +6,12 @@ from history import History
 from belief import Belief
 from sklearn import mixture
 import numpy as np
-from nav_env import NavEnv
+from env.nav_env import NavEnv
 from motion_planners.rrt_connect import birrt
-from dmp_traj_cluster import DMPTrajCluster
+from modelfree.dmp_traj_cluster import DMPTrajCluster
 from scipy.integrate import solve_ivp
 from rmpflow.rmp import RMPRoot
-from vae import make_vae, train_vae
+from modelfree.vae import make_vae, train_vae
 from rmpflow.rmp_leaf import GoalAttractorUni
 
 """
@@ -20,7 +20,7 @@ Can make decisions based on a nav_env
 
 
 class Agent:
-    def __init__(self, show_training=False):
+    def __init__(self, show_training=False, ours = False):
         self.history = History()
         self.belief = Belief(mu = [0,0], cov=1) #we know nothing
         self.autoencoder = None
@@ -30,6 +30,7 @@ class Agent:
         self.vae_fn = "models/vae.h5y"
         self.guapo_eps = 0.9
         self.rmp = None
+        self.ours = ours
         self.cluster_planning_history = self.dmp_cluster_planning_history
         self.pd_errors = []
     def get_curr_belief(self, ne):
@@ -42,14 +43,24 @@ class Agent:
         Selects actions and executes them
         :return:
         """
+        gave_up_on_mb = False
         while not ne.goal_condition_met():
-            curr_belief = self.get_curr_belief(ne)
-            action = policy(curr_belief, goal_belief) # policy doesn't care about velocity
-            success = self.execute_action(ne, action)
-            if not success:
-                print("Detected model error")
-                return
-        print("Achieved goal using MB policy")
+            if not gave_up_on_mb:
+                curr_belief = self.get_curr_belief(ne)
+                action, contact = policy(curr_belief, goal_belief, check_contact = True) # policy doesn't care about velocity
+                success = self.execute_action(ne, action)
+                if not success:
+                    print("Detected model error")
+                    if not self.ours:
+                        return
+                    else:
+                        gave_up_on_mb = True
+                        self.model_free_policy(ne, train=True, n_epochs=0, load_model="models/model1.h5")
+            else:
+                action = self.model_free_policy(ne, train=False, load_model="models/model1.h5")
+                ne.step(action)
+        print("Achieved goal")
+
     def off_path(self, expected_next, obs):
         diff = np.matrix(np.array(obs[0:2]) - expected_next.mean)
         if np.linalg.det(expected_next.cov) < 1e-12:
