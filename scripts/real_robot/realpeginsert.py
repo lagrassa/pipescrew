@@ -29,7 +29,10 @@ class Robot():
     def follow_traj(self, path)
         for pt in parth:
             new_pos = RigidTransform(rotation=pt[3:], translation=pt[0:3],from_frame='franka_tool', to_frame='world')
+            if new_pos.translation[2] < 0.04:
+                expect_contact = True
             fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2000, 2000, 500, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            #check for contact
 
 
     def get_shape_location(self, shape_type):
