@@ -3,7 +3,6 @@ import numpy as np
 import pybullet_tools.utils as ut
 import os
 from  pybullet_tools.utils import create_cylinder, set_point, set_pose, simulate_for_duration
-from make_pipe import make_cylinder
 
 
 """purely simulated world
@@ -72,7 +71,7 @@ class PegWorld():
         #quat =  p.getLinkState(self.robot, self.grasp_joint)[1]
         quat = [1,0,0,0]
         #all of this only really makes sense with a full robot
-        goal_pose = (goal+self.grasp, quat)
+        goal_pose = (goal+self.grasp[0], quat)
         joints_to_plan_for = ut.get_movable_joints(self.robot)[:-2] #all but the fingers
 
         rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
@@ -82,8 +81,9 @@ class PegWorld():
         ranges = 10*np.ones(len(joints_to_plan_for))
         null_space = [lower, upper, ranges, [rest]]
         null_space = None
-        import ipdb; ipdb.set_trace()
-        end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc 
+
+        end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
+        end_conf = end_conf[:len(joints_to_plan_for)]
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.square], attachments=self.in_hand,
                       self_collisions=True, disabled_collisions=set(self.in_hand),
                       weights=None, resolutions=None)
@@ -92,12 +92,15 @@ class PegWorld():
     def attach_shape(self, shape_name, grasp_pose):
         self.grasp = grasp_pose
         attachment = ut.Attachment(self.robot, self.grasp_joint, grasp_pose, self.shape_name_to_shape[shape_name])
+        new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
+        ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
         self.in_hand = [attachment]
 
     def detach_shape(self, shape_name):
         self.in_hand = []
 
 if __name__ == "__main__":
-    pw = PegWorld(visualize=True, handonly = False)
-    pw.attach_shape('circle', np.array([0,0,0.12]))
+    pw = PegWorld(visualize=False, handonly = False)
+    pw.attach_shape('circle', (np.array([0,0,0.12]), np.array([1,0,0,0])))
     traj = pw.make_traj(np.array([0,0.05,0.3]))
+    print("trajectory", traj)
