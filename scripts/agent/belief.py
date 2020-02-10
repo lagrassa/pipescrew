@@ -5,7 +5,7 @@ from sympy.geometry import *
 
 
 class Belief():
-    def __init__(self, mu=None, cov=None, particles = [], walls = [], action=None, siblings=[], parent=None, connected = False):
+    def __init__(self, mu=None, cov=None, particles = [], walls = [], init_only = False, action=None, siblings=[], parent=None, connected = False):
         n_particles = 5
         if mu is None:
             assert(particles is not None)
@@ -28,6 +28,7 @@ class Belief():
         self.connected = connected
         self._cov = cov
         self.action = action
+
         self.siblings = siblings
     def mean(self):
         return self._mean
@@ -35,6 +36,9 @@ class Belief():
         return self.siblings()
     def cov(self):
         return self._cov
+    """
+    Action that should be taken in this node to get to the goal
+    """
     def get_action(self):
         return self.action
     """
@@ -56,7 +60,10 @@ class Belief():
         plt.ylim(0,0.15)
         plt.scatter(xs, ys)
         if goal is not None:
-            plt.scatter([goal[0]], [goal[1]], s= 500, color = 'g')
+            if isinstance(goal, Belief):
+                plt.scatter([goal.mean()[0]], [goal.mean()[1]], s= 500, color = 'g')
+            else:
+                plt.scatter([goal[0]], [goal[1]], s= 500, color = 'g')
         plt.show()
 
 
@@ -157,3 +164,20 @@ class Particle():
     def world_contact_surfaces(self):
         return [x[1] for x in self.contacts]
 
+def mala_distance(q, belief):
+    if isinstance(q, Belief):
+        distance = 0
+        for particle in q.particles:
+            distance += 1. / len(q.particles) * mala_distance(particle, belief)**2
+        return np.sqrt(distance)
+    elif isinstance(q, tuple):
+        q = np.array(q)
+    elif isinstance(q, Particle):
+        q = q.pose
+    diff = np.matrix(np.array(q)- belief.mean())
+    cov = belief.cov()
+    if np.linalg.det(cov)  ==  0:
+        #low rank. What do? hack is to add eps noise
+        eps = 1e-12
+        cov = cov + eps
+    return np.sqrt(diff * np.linalg.inv(cov) * diff.T).item()

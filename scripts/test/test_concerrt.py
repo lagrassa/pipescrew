@@ -57,8 +57,7 @@ def test_guarded_far():
 def test_need_slide():
     backboard =  Wall((0.05, 0.12), (0.3, 0.12))
     sideboard =  Wall((0.2, 0.12), (0.2, 0))
-    b0 = Belief(mu=(0.04,0.05), cov = 0.0001, walls = [backboard, sideboard], init_only = True)
-    b0.visualize()
+    b0 = Belief(mu=(0.04,0.05), cov = 0.001, walls = [backboard, sideboard], init_only = True)
     bg = Belief(mu=(0.18,0.12), cov = 0.001, walls = [backboard, sideboard], init_only = True)
     #b0.visualize(goal=bg)
     bg.connected = True #because it's the goal
@@ -69,7 +68,7 @@ def test_need_slide():
         action = actions[i]#policy(curr_belief, bg)
         print(action)
         curr_belief = simulate(action) # a little weird to write out but the action has a beginning belief stored in it
-        curr_belief.visualize(goal=bg)
+        curr_belief.high_prob_collision(old_belief=b0)
     assert(mala_distance(curr_belief,bg) < 0.3)
 
 
