@@ -74,6 +74,7 @@ class Tree:
                 if in_goal_belief(b_dprime, b_goal):
                     b_dprimes_that_worked.append(b_dprime)
                     b_dprime.connected = True
+                    b_dprime.action = NullAction(b_goal.mean(), b_dprime)
                     #print("somethings in the goal belief")
         return b_dprimes_that_worked, b_dfailures
 
@@ -106,8 +107,11 @@ class Tree:
                 if child.connected == return_connected:
                     nodes.append(child)
         return nodes
-
+    """
+    Also does validation. parents with children need actions to get to them
+    """
     def update_tree(self):
+        assert(self.data.action is not None)
         for child in self.children:
             if isinstance(child, Tree):
                 child.update_tree()
@@ -135,7 +139,34 @@ class Tree:
 class Policy:
     def __init__(self, tree):
         self.tree = tree
-
+    """
+    List of actions needed to get to the goal
+    Assumes starts at the root
+    """
+    def get_best_actions(self, init_belief, bg):
+        curr_node = self.tree #TODO assert these are close to each other
+        actions = [curr_node.data.get_action()]
+        should_contacts = [curr_node.data.high_prob_collision(curr_node.data)]
+        def child_is_connected(node):
+            return ((isinstance(node, Belief) and node.connected)
+                                            or (isinstance(node, Tree) and node.data.connected))
+        def n_particles(node):
+            if isinstance(node, Belief):
+                return len(node.particles)
+            else:
+                return len(node.data.particles)
+        while True:
+            most_likely_child = np.argmax([n_particles(node) for node in curr_node.children if child_is_connected(node) ])
+            child = curr_node.children[most_likely_child]
+            curr_belief = child
+            assert(curr_belief.action is not None)
+            actions.append(curr_belief.action)
+            if child.high_prob_collision(curr_belief):
+                should_contacts.append(True)
+            else:
+                should_contacts.append(False)
+            if in_goal_belief(curr_belief, bg):
+                return actions
     """
     Given a belief state returns an action
     estimates which state we are in and then returns the appropriate action
@@ -149,7 +180,7 @@ class Policy:
         if most_likely_action is None:
             print("Action is Nonetype")
         if check_contact:
-            contact = most_likely_current_tree.data.high_probability_collision(most_likely_current_tree.data.parent):
+            contact = most_likely_current_tree.data.high_probability_collision(most_likely_current_tree.data.parent)
             return most_likely_action, contact
         else:
             return most_likely_action
@@ -350,6 +381,7 @@ def in_goal_belief(b_dprime, b_goal):
         distance = mala_distance(q, b_goal)
         if distance > 1:
             all_close = False
+
     return all_close
 """
 Moves a particle with an amount of Gaussian noise 
@@ -479,13 +511,15 @@ class Guarded:
     """
 
     def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 1 and not self.b_near.high_prob_collision(self.old_belief, p = 0.9):
-            closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
+        closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
+        current_b = self.b_near
+        while(mala_distance(self.q_rand, current_b)) > 1 and not current_b.high_prob_collision(self.old_belief, p = 0.9):
             diff = closest_wall_pt - self.b_near.mean()
             shift = diff / np.linalg.norm(diff) * self.delta
-            moved_particles = [propagate_particle_to_q(part, shift=shift, sigma=self.sigma, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
-            self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
-        return self.b_near
+            moved_particles = [propagate_particle_to_q(part, shift=shift, sigma=self.sigma, belief = current_b, old_belief = self.old_belief) for part in current_b.particles]
+            current_b=  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
+            print("mean", current_b.mean())
+        return current_b
 
     def get_control(self, state,dt, ext_force_mag):
         q = self.q_rand
