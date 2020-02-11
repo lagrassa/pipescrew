@@ -54,20 +54,23 @@ def propagate_particle_to_q(part, shift=None, sigma=None, old_belief =None, beli
 """
 Propagates particle but only as far as the belief will go 
 """
-def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None):
+def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None, skip_wall = None):
     new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
     new_part = Particle(new_pose)
     walls_in_contact = belief.collision_with_particle(old_belief, new_part)
     if len(walls_in_contact) > 0:
         for wall in walls_in_contact:
-            new_part.contacts.append((None, wall))
-        stopped_pose = np.array(wall.closest_pt(part.pose))
-        new_part.pose = stopped_pose
+            if wall != skip_wall:
+                new_part.contacts.append((None, wall))
+                stopped_pose = np.array(wall.closest_pt(part.pose))
+                new_part.pose = stopped_pose
+                break
+
     return new_part
 
-def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta = 0.02):
+def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta = 0.02, skip_wall = None):
     shift = (dir / np.linalg.norm(dir)) * delta
-    new_part = propagate_particle(part, shift, belief=belief,old_belief = old_belief, sigma=0)
+    new_part = propagate_particle(part, shift, belief=belief,old_belief = old_belief, sigma=0,skip_wall=skip_wall)
     return new_part
 
 class Connect:
@@ -175,7 +178,7 @@ class Slide:
         while(mala_distance(self.q_rand, self.b_near)) > 2 or current_b.high_prob_collision(self.old_belief, wall = old_wall):
             if np.any([current_b.high_prob_collision(self.old_belief, wall=other_wall) for other_wall in other_walls]):
                 break
-            particles = [propagate_particle_by_dir(part, best_dir, belief = current_b, old_belief = self.old_belief, delta = self.delta) for part in current_b.particles]
+            particles = [propagate_particle_by_dir(part, best_dir, belief = current_b, old_belief = self.old_belief, delta = self.delta, skip_wall=old_wall) for part in current_b.particles]
             print("slide  mmodel")
             current_b = Belief(particles=particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
         return current_b
