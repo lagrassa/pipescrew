@@ -1,7 +1,7 @@
 from agent.belief import Belief
 from agent.belief import Wall
 import numpy as np
-from planning.concerrt import Connect, Guarded, Slide
+from planning.concerrt import Connect, Guarded, Slide, Tree
 
 def test_belief_constructor():
     mu = np.array([1,0])
@@ -70,12 +70,32 @@ def test_slide_motion_model():
     new_belief2.visualize(goal=side_q)
 
 
+def test_visualize_belief():
+    wall_1 = Wall((0.05, 0.1), (0.3, 0.1))
+    close_belief = Belief(mu=(0.17, 0.05), cov = 0.00005, walls = [wall_1], init_only = True)
+    b2 = Belief(mu=(0.14, 0.02), cov = 0.00005, walls = [wall_1], init_only = True)
+    b3 = Belief(mu=(0.11, 0.03), cov = 0.00005, walls = [wall_1], init_only = True)
+    b4 = Belief(mu=(0.12, 0.05), cov = 0.00005, walls = [wall_1], init_only = True)
+    tree = Tree(close_belief)
+    tree.add_belief(close_belief, b2)
+    tree.display()
+    resp = input("confirm looks good")
+    assert('y' in resp)
+    tree.add_belief(b2, b3)
+    tree.display()
+    resp = input("confirm looks good")
+    assert('y' in resp)
+    tree.add_belief(b2, b4)
+    tree.display()
+    resp = input("confirm looks good")
+    assert('y' in resp)
 
 
 
 #test_wall_close()
 #test_collision_one_wall()
-test_slide_motion_model()
+#test_slide_motion_model()
+test_visualize_belief()
 
 
 

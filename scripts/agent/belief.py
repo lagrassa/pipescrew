@@ -30,6 +30,8 @@ class Belief():
         self.action = action
 
         self.siblings = siblings
+    def __str__(self):
+        return "Belief "+str(np.round(self.mean(),3)) + " cov " + str(np.round(self.cov(), 2))
     def mean(self):
         return self._mean
     def siblings(self):
@@ -95,11 +97,10 @@ class Belief():
         for wall, i in zip(self.walls, range(len(self.walls))):
             parts_in_collision = wall.get_particles_in_collision(self, old_belief)
             for part in parts_in_collision:
-                if wall.endpoints not in part.world_contact_surfaces():
-                    if i not in wall_i_to_colliding_parts.keys():
-                        wall_i_to_colliding_parts[i] = [part]
-                    else:
-                        wall_i_to_colliding_parts[i].append(part)
+                if i not in wall_i_to_colliding_parts.keys():
+                    wall_i_to_colliding_parts[i] = [part]
+                else:
+                    wall_i_to_colliding_parts[i].append(part)
         return wall_i_to_colliding_parts
 
     def collision_with_particle(self, old_belief, part):
@@ -135,7 +136,11 @@ class Wall():
         return parts_in_collision
 
     def is_particle_in_collision(self, pt, old_belief):
+        thresh =0.03
+        if self.line.distance(pt) < thresh:
+            return 1
         seg = sg.LineString([old_belief.mean(), pt])
+
         #inside_wall = bool(len(intersection(seg, self.line)))
         intersections = seg.intersection(self.sg_line)
         inside_wall = bool(len(intersections.coords))
@@ -178,6 +183,6 @@ def mala_distance(q, belief):
     cov = belief.cov()
     if np.linalg.det(cov)  ==  0:
         #low rank. What do? hack is to add eps noise
-        eps = 1e-12
+        eps = 1e-4
         cov = cov + eps
     return np.sqrt(diff * np.linalg.inv(cov) * diff.T).item()

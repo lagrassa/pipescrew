@@ -134,6 +134,10 @@ class Tree:
             b_contingencies = belief_partitioning(b_prime)
             for belief in b_contingencies:
                 self.add_belief(b_near, belief)
+                try:
+                    self.display()
+                except:
+                    import ipdb; ipdb.set_trace()
                 unconnected_partitions += self.goal_connect(b_connected)[1]
         new_tree = self.update_tree()
         return new_tree, unconnected_partitions
@@ -223,16 +227,18 @@ class Policy:
         self.tree = tree
 
 def construct_tree(subtree, G, parent_name):
-
     for child in subtree.children:
         if isinstance(child, Belief):
             color = "green" if child.connected else "red"
-            G.add_node(make_node_name(child), color = color)
+            shape = "box" if child.high_prob_collision(child.parent) else "circle"
+            G.add_node(make_node_name(child), color = color, shape=shape)
+            assert(make_node_name(child) != parent_name)
             G.add_edge(parent_name, make_node_name(child))
         else:
             color = "green" if child.data.connected else "red"
             G.add_node(make_node_name(child.data), color = color)
             G.add_edge(parent_name, make_node_name(child.data))
+            assert (make_node_name(child.data) != parent_name)
             construct_tree(child, G, make_node_name(child.data))
 
 def make_node_name(belief):
@@ -305,14 +311,8 @@ connect, guarded, or slide.
 
 def select_action(q_rand, b_near,b_old, gamma, delta = 0.04):
     walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
-    p_in_contact = 0
-    if len(b_near.walls) > 0:
-        for part in b_near.particles:
-            p_on_wall = len([wall for wall in b_near.walls if wall in walls_endpoints_to_parts.keys() and part in walls_endpoints_to_parts[wall]])/len(b_near.walls)
-            p_in_contact += (1./len(b_near.particles))*p_on_wall
-    if p_in_contact > 0:
-        print(p_in_contact, "p in contact")
-    in_contact = p_in_contact >= 0.96
+    in_contact = b_near.high_prob_collision(b_old)
+    print(in_contact, "contact")
     if in_contact:
         return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near, b_old, delta = delta)
     else:

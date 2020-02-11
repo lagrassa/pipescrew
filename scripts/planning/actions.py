@@ -97,6 +97,7 @@ class Connect:
             self.old_belief = self.b_near
             current_b = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
             #print(self.b_near.mean(), self.q_rand)
+            print("connect mmodel")
         return current_b
 
 def get_control(q, state,dt,ext_force_mag, delta, sigma, belief):
@@ -134,7 +135,7 @@ class Guarded:
     def motion_model(self):
         closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
         current_b = self.b_near
-        while(mala_distance(self.q_rand, current_b)) > 1 and not current_b.high_prob_collision(self.old_belief, p = 0.9):
+        while(mala_distance(self.q_rand, current_b)) > 1 and not current_b.high_prob_collision(self.old_belief):
             diff = closest_wall_pt - self.b_near.mean()
             shift = diff / np.linalg.norm(diff) * self.delta
             moved_particles = [propagate_particle_to_q(part, shift=shift, sigma=self.sigma, belief = current_b, old_belief = self.old_belief) for part in current_b.particles]
@@ -148,7 +149,7 @@ class Guarded:
 
 
 class Slide:
-    def __init__(self, q_rand, b_near, b_old, sigma=0.01, delta = 0.02):
+    def __init__(self, q_rand, b_near, b_old, sigma=0.01, delta = 0.05):
         self.q_rand = q_rand
         self.b_near = b_near
         self.sigma = sigma
@@ -162,16 +163,22 @@ class Slide:
         forward_dir = best_ees[0]-best_ees[1]
         wall_i_to_particles = self.b_near.find_collisions(self.old_belief) #wall majority of particles are in contact with
         old_wall = self.b_near.walls[max(wall_i_to_particles.keys(), key = lambda x: len(wall_i_to_particles[x]))]
+        other_walls = [wall for wall in self.b_near.walls if wall != old_wall]
         current_b = self.b_near
+        #optimize the gradient that minimizes the distance between b_near and q_near
+        us_to_q = np.array(self.q_rand-self.b_near.mean())
+        if np.dot(us_to_q, forward_dir) > np.dot(us_to_q, -forward_dir):
+            best_dir = forward_dir
+        else:
+            best_dir = -forward_dir
         #direction along best_ee to q
         while(mala_distance(self.q_rand, self.b_near)) > 2 or current_b.high_prob_collision(self.old_belief, wall = old_wall):
-            forward_particles = [propagate_particle_by_dir(part, forward_dir, belief = current_b, old_belief = self.old_belief, delta = self.delta) for part in current_b.particles]
-            backward_particles = [propagate_particle_by_dir(part, -forward_dir, belief =current_b, old_belief = self.old_belief, delta = self.delta) for part in current_b.particles]
-            forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
-            backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls, parent=self.b_near)
-            current_b =  min([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
+            if np.any([current_b.high_prob_collision(self.old_belief, wall=other_wall) for other_wall in other_walls]):
+                break
+            particles = [propagate_particle_by_dir(part, best_dir, belief = current_b, old_belief = self.old_belief, delta = self.delta) for part in current_b.particles]
+            print("slide  mmodel")
+            current_b = Belief(particles=particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
         return current_b
-
 class NullAction:
     def __init__(self,q_rand, b_near):
         self.b_near = b_near
