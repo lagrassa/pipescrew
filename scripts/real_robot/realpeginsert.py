@@ -5,7 +5,7 @@ import time
 import numpy as np
 from franka_action_lib.srv import GetCurrentRobotStateCmd
 from autolab_core import RigidTransform
-
+import GPy as gpy
 fa = FrankaArm()
 class Robot():
     def __init__(self):
@@ -14,6 +14,11 @@ class Robot():
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         self.contact_threshold = -1.5 # less than is in contact
+        self.shape_type_to_pose = {}
+        self.bad_model_states = []
+        self.good_model_states = []
+        self.shape_type_to_pose[Circle] = [0.1,0,0]
+        self.shape_type_to_pose[Square] = [-0.1,0,0]
         pass
     """
     Goes to shape center and then grasps it 
@@ -21,7 +26,9 @@ class Robot():
     def grasp_shape(self,shape_center, shape_type):
        self.holding_type = shape_type 
        fa.open_gripper()
+       start = fa.get_pose().translation
        path = self.linear_interp(start, shape_center)
+       self.follow_traj(path)
        fa.close_gripper()
 
     """
@@ -29,22 +36,47 @@ class Robot():
     """
     def insert_shape(self):
         #find corresponding hole and orientation
-        shape_loc = self.get_shape_location(location, self.holding_type)
+        shape_loc = self.get_shape_location( self.holding_type)
         goal_loc_gripper = shape_loc + [0,0,0.02] #transform to robot gripper
-        path = self.linear_interp(start, goal_loc_gripper)
+        start = fa.get_pose()
+        path = self.linear_interp(start.translation, goal_loc_gripper)
         self.follow_traj(path)
 
     def follow_traj(self, path):
-        for pt in parth:
+        for pt, i in zip(path, len(path)):
             new_pos = RigidTransform(rotation=pt[3:], translation=pt[0:3],from_frame='franka_tool', to_frame='world')
             if new_pos.translation[2] < 0.04:
                 expect_contact = True
             fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2000, 2000, 500, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
-            #check for contact
+            #consider breaking this one up to make it smoother
+            force = self.feelforce()
+            model_deviation = False
+            if force < self.contact_threshold and not expect_contact:
+                print("unexpected contact")
+                model_deviation = True
+            elif force > self.contact_threshold and expect_contact:
+                print("expected contact")
+                model_deviation = True
+            if model_deviation:
+                self.bad_model_states.append(path[i-1])
+            else:
+                self.good_model_state.append(path[i-1])
+    def train_model(self):
+        self.high_state = [0.4,0.4,0.05]
+        self.low_state = [-0.4, -0.4, 0.00]
+        lengthscale = (self.high_state-self.low_state) * 0.05
+        k = gpy.kern.Matern52(self.high_state, ARD=True, lengthscale=lengthscale)
+        states = np.vstack([self.bad_model_states, self.good_model_states])
+        labels = np.vstack([-np.ones(len(self.bad_model_states)), np.ones(len(self.good_model_states))])
+        self.model = gpy.models.GPRegression(states, labels, k)
+        self.model['.*variance'].constrain_bounded(1e-1,2., warning=False)
+        self.model['Gaussian_noise.variance'].constrain_bounded(1e-4,0.01, warning=False)
+        # These GP hyper parameters need to be calibrated for good uncertainty predictions.
+        self.model.optimize(messages=False)
 
 
     def get_shape_location(self, shape_type):
-        return shape_type_to_pose[shape_type]
+        return self.shape_type_to_pose[shape_type]
     def feelforce(self):
         ros_data = self._get_current_robot_state().robot_state
         force = ros_data.O_F_ext_hat_K
@@ -56,9 +88,10 @@ class Robot():
     def linear_interp(self, start, goal, n_pts = 10):
         return np.linspace(start, goal, n_pts)
     def keyboard_teleop(self):
-        print("WASD teleop space for up c for down")
+        print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
         rt = fa.get_pose()
         delta = 0.01
+        angle_delta = 0.1
         while True:
             val = input()
             if val == "a":
@@ -73,11 +106,22 @@ class Robot():
                 rt.translation[-1] += delta
             elif val == "c":
                 rt.translation[-1] -= delta
-
-            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            elif val == "q":
+                rt_rot = RigidTransform.z_axis_rotation(0.1)
+                rt = rt.apply(rt_rot)
+            elif val == "e":
+                rt_rot = RigidTransform.z_axis_rotation(-0.1)
+                rt = rt.apply(rt_rot)
+            elif val == 'k':
+                delta *= 2
+                angle_delta *= 2
+            elif val == "j":
+                delta /= 2
+                angle_delta /=2
             
+            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             time.sleep(0.05)
-     
+
 
 
 class Circle:
@@ -87,7 +131,9 @@ class Square:
     pass
 
 if __name__ == "__main__":
-    robot = Robot()        
+    robot = Robot()
+    shape_center = (0,-0.1,0)
+    robot.grasp_shape(shape_center, Circle)
     robot.keyboard_teleop()
         
 
