@@ -39,7 +39,7 @@ class PipeWorld():
     table with a hollow and solid cylinder on it
     """
     def setup_workspace(self):
-        self.floor = p.loadURDF("../models/short_floor.urdf")
+        self.floor = p.loadURDF("../../models/short_floor.urdf")
         p.changeDynamics(self.floor, -1, mass=0)
         #self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
         length =0.04

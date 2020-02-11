@@ -1,8 +1,8 @@
 import pybullet as p
 import numpy as np
-import pybullet_tools.utils as ut
+import utils as ut
 import os
-from  pybullet_tools.utils import create_cylinder, set_point, set_pose, simulate_for_duration
+from  utils import create_cylinder, set_point, set_pose, simulate_for_duration
 
 
 """purely simulated world
@@ -48,17 +48,21 @@ class PegWorld():
     def setup_workspace(self):
         self.floor = p.loadURDF("../../models/short_floor.urdf")
         #make board
-        width = 0.2
-        length = 0.1
-        height = 0.04
-        block_height = 0.03
+        width = 0.3
+        length = 0.2
+        height = 0.02
+        block_height = 0.01
         self.board = ut.create_box(width, length, height) 
         #make circle
-        radius = 0.1
+        radius = 0.02
         self.circle = ut.create_cylinder(radius, block_height)
         #make square
-        square_side = 0.08
-        self.square =  ut.create_box(square_side, square_side, block_height)
+        square_side = 0.03
+        self.square =  ut.create_box(square_side, square_side, block_height, color=(0,0,1,1))
+        square_loc = (0,-0.2,0)
+        circle_loc = (0,0.1,0)
+        ut.set_point(self.square, square_loc)
+        ut.set_point(self.circle, square_loc)
         self.shape_name_to_shape = {}
         self.shape_name_to_shape['circle'] = self.circle
         self.shape_name_to_shape['square'] = self.square
@@ -84,6 +88,8 @@ class PegWorld():
 
         end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
         end_conf = end_conf[:len(joints_to_plan_for)]
+        for attachment in self.in_hand:
+            attachment.assign()
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.square], attachments=self.in_hand,
                       self_collisions=True, disabled_collisions=set(self.in_hand),
                       weights=None, resolutions=None)
