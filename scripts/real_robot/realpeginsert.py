@@ -9,17 +9,17 @@ import GPy as gpy
 fa = FrankaArm()
 class Robot():
     def __init__(self):
-        shape_type_to_pose = {Square: (0,0,0.07), Circle: (0,0,0.02)}
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         self.contact_threshold = -1.5 # less than is in contact
-        self.shape_type_to_pose = {}
+        self.shape_type_to_goal_pose = {Square: (0,0,0.07), Circle: (0,0,0.02)} #eventually comes from perception
         self.bad_model_states = []
         self.good_model_states = []
-        self.shape_type_to_pose[Circle] = [0.1,0,0]
-        self.shape_type_to_pose[Square] = [-0.1,0,0]
-        pass
+        self.shape_type_to_goal_pose[Circle] = RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
+
+        self.shape_type_to_goal_pose[Square] = RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
+
     """
     Goes to shape center and then grasps it 
     """
@@ -27,7 +27,7 @@ class Robot():
        self.holding_type = shape_type 
        fa.open_gripper()
        start = fa.get_pose().translation
-       path = self.linear_interp(start, shape_center)
+       path = self.linear_interp_planner(start, shape_center)
        self.follow_traj(path)
        fa.close_gripper()
 
@@ -36,10 +36,10 @@ class Robot():
     """
     def insert_shape(self):
         #find corresponding hole and orientation
-        shape_loc = self.get_shape_location( self.holding_type)
+        shape_loc = self.get_shape_goal_location( self.holding_type)
         goal_loc_gripper = shape_loc + [0,0,0.02] #transform to robot gripper
         start = fa.get_pose()
-        path = self.linear_interp(start.translation, goal_loc_gripper)
+        path = self.linear_interp_planner(start.translation, goal_loc_gripper)
         self.follow_traj(path)
 
     def follow_traj(self, path):
@@ -61,6 +61,8 @@ class Robot():
                 self.bad_model_states.append(path[i-1])
             else:
                 self.good_model_state.append(path[i-1])
+            np.save("data/bad_model_states.npy")
+            np.save("data/good_model_states.npy")
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
@@ -75,8 +77,13 @@ class Robot():
         self.model.optimize(messages=False)
 
 
+    def get_shape_goal_location(self, shape_type):
+        return self.shape_type_to_goal_pose[shape_type]
     def get_shape_location(self, shape_type):
-        return self.shape_type_to_pose[shape_type]
+        if shape_type == Circle:
+            return RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
+        else:
+            return RigidTransform(rotation=np.array([1,0,0,0]), translation=[-0.1,0,0.2],from_frame='franka_tool', to_frame='world')
     def feelforce(self):
         ros_data = self._get_current_robot_state().robot_state
         force = ros_data.O_F_ext_hat_K
@@ -85,7 +92,7 @@ class Robot():
     """
     Linear interpolation of poses, including quaternion
     """
-    def linear_interp(self, start, goal, n_pts = 10):
+    def linear_interp_planner(self, start, goal, n_pts = 8):
         return np.linspace(start, goal, n_pts)
     def keyboard_teleop(self):
         print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
@@ -132,8 +139,9 @@ class Square:
 
 if __name__ == "__main__":
     robot = Robot()
-    shape_center = (0,-0.1,0)
+    shape_center = robot.get_shape_location(Circle)
     robot.grasp_shape(shape_center, Circle)
+    robot.insert_shape()
     robot.keyboard_teleop()
         
 
