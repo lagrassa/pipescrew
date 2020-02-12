@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     T_tag_tool = RigidTransform(rotation = np.eye(3),translation = [0,0,0.04], from_frame=T_tag_world.from_frame, to_frame="franka_tool") 
     T_tool_world =  T_tag_world *T_tag_tool.inverse()
-    ret = fa.goto_pose(T_tool_world)
+    fa.goto_pose_with_cartesian_control(T_tool_world, cartesian_impedances=[2000, 2000, 1000, 300, 300, 300])
 
     logging.info('Finding closest orthogonal grasp')
     T_grasp_world = get_closest_grasp_pose(T_tag_world, T_ready_world)
