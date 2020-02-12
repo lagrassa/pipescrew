@@ -27,7 +27,7 @@ class Robot():
         self.good_model_states = []
         self.shape_to_goal_loc = {}
         self.shape_type_to_id = {Rectangle:0}
-        self.shape_goal_type_to_id = {Rectangle:0}
+        self.shape_goal_type_to_id = {Rectangle:1}
         self.setup_perception()
 
     def setup_perception(self):
@@ -52,8 +52,8 @@ class Robot():
     def grasp_shape(self,T_tag_world, shape_type):
        self.holding_type = shape_type
        x_offset = 0.024
-       z_offset = 0.02
-       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, 0.02], from_frame=T_tag_world.from_frame,
+       z_offset = 0.03
+       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, z_offset], from_frame=T_tag_world.from_frame,
                                    to_frame="franka_tool")
        T_tool_world = T_tag_world * T_tag_tool.inverse()
        fa.open_gripper()
@@ -77,11 +77,15 @@ class Robot():
         self.follow_traj(path)
 
     def follow_traj(self, path):
-        for pt, i in zip(path, len(path)):
-            new_pos = RigidTransform(rotation=pt[3:], translation=pt[0:3],from_frame='franka_tool', to_frame='world')
+        for pt, i in zip(path, range(len(path))):
+            new_pos = pt
+            expect_contact = False
             if new_pos.translation[2] < 0.04:
                 expect_contact = True
-            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2000, 2000, 500, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+
+            import ipdb; ipdb.set_trace()
+            #fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2000, 2000, 1000, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
@@ -94,9 +98,9 @@ class Robot():
             if model_deviation:
                 self.bad_model_states.append(path[i-1])
             else:
-                self.good_model_state.append(path[i-1])
-            np.save("data/bad_model_states.npy")
-            np.save("data/good_model_states.npy")
+                self.good_model_states.append(path[i-1])
+            np.save("data/bad_model_states.npy", self.bad_model_states)
+            np.save("data/good_model_states.npy", self.good_model_states)
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
@@ -114,6 +118,7 @@ class Robot():
     def get_shape_goal_location(self, shape_type):
         goal_id = self.shape_goal_type_to_id[shape_type]
         if shape_type not in self.shape_to_goal_loc.keys():
+            import ipdb; ipdb.set_trace()
             goal_loc = self.detect_ar_world_pos(goal_id)
             self.shape_to_goal_loc[shape_type] = goal_loc
         return self.shape_to_goal_loc[shape_type]
@@ -126,13 +131,13 @@ class Robot():
     def feelforce(self):
         ros_data = self._get_current_robot_state().robot_state
         force = ros_data.O_F_ext_hat_K
-        return force
+        return force[2]
 
     """
     Linear interpolation of poses, including quaternion
     """
-    def linear_interp_planner(self, start, goal, n_pts = 8):
-        return start.RigidTransform.linear_trajectory_to(goal, n_pts)
+    def linear_interp_planner(self, start, goal, n_pts = 2):
+        return start.linear_trajectory_to(goal, n_pts)
     def keyboard_teleop(self):
         print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
         rt = fa.get_pose()
@@ -165,15 +170,16 @@ class Robot():
                 delta /= 2
                 angle_delta /=2
             
-            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            #fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            fa.goto_pose(rt)
             time.sleep(0.05)
 
 def straighten_transform(rt):
     angles = rt.euler_angles
     roll_off = angles[0]
     pitch_off = angles[1]
-    roll_fix = RigidTransform.x_axis_rotation(-roll_off, from_frame = rt.from_frame, from_frame=rt.from_frame)
-    pitch_fix = RigidTransform.y_axis_rotation(-pitch_off, from_frame = rt.from_frame, from_frame=rt.from_frame)
+    roll_fix = RigidTransform(rotation = RigidTransform.x_axis_rotation(np.pi-roll_off),  from_frame = rt.from_frame, to_frame=rt.from_frame)
+    pitch_fix = RigidTransform(rotation = RigidTransform.y_axis_rotation(pitch_off), from_frame = rt.from_frame, to_frame=rt.from_frame)
     new_rt = rt*roll_fix*pitch_fix
     return new_rt
 
@@ -188,7 +194,7 @@ class Rectangle:
 if __name__ == "__main__":
     robot = Robot()
     shape_center = robot.get_shape_location(Rectangle)
-    robot.get_shape_goal_location(Rectangle)
+    print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     robot.grasp_shape(shape_center, Rectangle)
     robot.insert_shape()
     robot.keyboard_teleop()
