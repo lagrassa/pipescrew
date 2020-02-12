@@ -6,6 +6,16 @@ import numpy as np
 from franka_action_lib.srv import GetCurrentRobotStateCmd
 from autolab_core import RigidTransform
 import GPy as gpy
+from autolab_core import RigidTransform, YamlConfig
+from visualization import Visualizer3D as vis3d
+
+from perception_utils.apriltags import AprilTagDetector
+from perception_utils.realsense import get_first_realsense_sensor
+
+from perception import Kinect2SensorFactory, KinectSensorBridged
+from perception.camera_intrinsics import CameraIntrinsics
+
+from frankapy import FrankaArm
 fa = FrankaArm()
 class Robot():
     def __init__(self):
@@ -13,21 +23,42 @@ class Robot():
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         self.contact_threshold = -1.5 # less than is in contact
-        self.shape_type_to_goal_pose = {Square: (0,0,0.07), Circle: (0,0,0.02)} #eventually comes from perception
         self.bad_model_states = []
         self.good_model_states = []
-        self.shape_type_to_goal_pose[Circle] = RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
+        self.shape_to_goal_loc = {}
+        self.shape_type_to_id = {Rectangle:0}
+        self.shape_goal_type_to_id = {Rectangle:0}
+        self.setup_perception()
 
-        self.shape_type_to_goal_pose[Square] = RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
+    def setup_perception(self):
+        self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
+        self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
+        self.sensor = Kinect2SensorFactory.sensor('bridged', self.cfg)  # Kinect sensor object
+        self.sensor.start()
+        self.april = AprilTagDetector(self.cfg['april_tag'])
+        # intr = sensor.color_intrinsics #original
+        self.intr = CameraIntrinsics('k4a', 972.31787109375, 971.8189086914062,
+                                1022.3043212890625, 777.7421875, height=1536, width=2048)
 
+    def detect_ar_world_pos(self,id, straighten=True):
+        T_tag_camera = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])[id]
+        T_tag_world = self.T_camera_world * T_tag_camera
+        if straighten:
+            T_tag_world  = straighten_transform(T_tag_world)
+        return T_tag_world
     """
     Goes to shape center and then grasps it 
     """
-    def grasp_shape(self,shape_center, shape_type):
-       self.holding_type = shape_type 
+    def grasp_shape(self,T_tag_world, shape_type):
+       self.holding_type = shape_type
+       x_offset = 0.024
+       z_offset = 0.02
+       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, 0.02], from_frame=T_tag_world.from_frame,
+                                   to_frame="franka_tool")
+       T_tool_world = T_tag_world * T_tag_tool.inverse()
        fa.open_gripper()
-       start = fa.get_pose().translation
-       path = self.linear_interp_planner(start, shape_center)
+       start = fa.get_pose()
+       path = self.linear_interp_planner(start, T_tool_world)
        self.follow_traj(path)
        fa.close_gripper()
 
@@ -36,10 +67,13 @@ class Robot():
     """
     def insert_shape(self):
         #find corresponding hole and orientation
-        shape_loc = self.get_shape_goal_location( self.holding_type)
-        goal_loc_gripper = shape_loc + [0,0,0.02] #transform to robot gripper
+        T_tag_world = self.get_shape_goal_location( self.holding_type)
+        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.02],
+                                    from_frame=T_tag_world.from_frame,
+                                    to_frame="franka_tool")
+        T_tool_world = T_tag_world * T_tag_tool.inverse()
         start = fa.get_pose()
-        path = self.linear_interp_planner(start.translation, goal_loc_gripper)
+        path = self.linear_interp_planner(start, T_tool_world)
         self.follow_traj(path)
 
     def follow_traj(self, path):
@@ -78,12 +112,17 @@ class Robot():
 
 
     def get_shape_goal_location(self, shape_type):
-        return self.shape_type_to_goal_pose[shape_type]
+        goal_id = self.shape_goal_type_to_id[shape_type]
+        if shape_type not in self.shape_to_goal_loc.keys():
+            goal_loc = self.detect_ar_world_pos(goal_id)
+            self.shape_to_goal_loc[shape_type] = goal_loc
+        return self.shape_to_goal_loc[shape_type]
+
     def get_shape_location(self, shape_type):
-        if shape_type == Circle:
-            return RigidTransform(rotation=np.array([1,0,0,0]), translation=[0.1,0,0.02],from_frame='franka_tool', to_frame='world')
-        else:
-            return RigidTransform(rotation=np.array([1,0,0,0]), translation=[-0.1,0,0.2],from_frame='franka_tool', to_frame='world')
+        shape_id = self.shape_type_to_id[shape_type]
+        return self.detect_ar_world_pos(shape_id)
+
+
     def feelforce(self):
         ros_data = self._get_current_robot_state().robot_state
         force = ros_data.O_F_ext_hat_K
@@ -93,7 +132,7 @@ class Robot():
     Linear interpolation of poses, including quaternion
     """
     def linear_interp_planner(self, start, goal, n_pts = 8):
-        return np.linspace(start, goal, n_pts)
+        return start.RigidTransform.linear_trajectory_to(goal, n_pts)
     def keyboard_teleop(self):
         print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
         rt = fa.get_pose()
@@ -129,21 +168,27 @@ class Robot():
             fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             time.sleep(0.05)
 
-
+def straighten_transform(rt):
+    angles = rt.euler_angles
+    roll_off = angles[0]
+    pitch_off = angles[1]
+    roll_fix = RigidTransform.x_axis_rotation(-roll_off, from_frame = rt.from_frame, from_frame=rt.from_frame)
+    pitch_fix = RigidTransform.y_axis_rotation(-pitch_off, from_frame = rt.from_frame, from_frame=rt.from_frame)
+    new_rt = rt*roll_fix*pitch_fix
+    return new_rt
 
 class Circle:
     pass
 
 class Square:
     pass
+class Rectangle:
+    pass
 
 if __name__ == "__main__":
     robot = Robot()
-    shape_center = robot.get_shape_location(Circle)
-    robot.grasp_shape(shape_center, Circle)
+    shape_center = robot.get_shape_location(Rectangle)
+    robot.get_shape_goal_location(Rectangle)
+    robot.grasp_shape(shape_center, Rectangle)
     robot.insert_shape()
     robot.keyboard_teleop()
-        
-
-
-
