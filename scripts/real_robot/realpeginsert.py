@@ -85,6 +85,10 @@ class Robot():
             #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
+            if np.linalg.norm(fa.get_pose().translation-new_pos.translation) > pose_thresh:
+                model_deviation = True
+                print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
+                      str(np.round(fa.get_pose().translation,2)))
             if force < self.contact_threshold and not expect_contact:
                 print("unexpected contact")
                 model_deviation = True
@@ -121,7 +125,11 @@ class Robot():
     def get_shape_location(self, shape_type):
         shape_id = self.shape_type_to_id[shape_type]
         return self.detect_ar_world_pos(shape_id)
-
+    """
+    moves arm back to pose where it's not in the way of the camera
+    """
+    def reset_arm(self):
+        fa.reset_joints()
 
     def feelforce(self):
         ros_data = self._get_current_robot_state().robot_state
