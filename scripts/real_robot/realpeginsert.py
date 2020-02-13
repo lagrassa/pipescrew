@@ -27,8 +27,14 @@ class Rectangle:
     def __init__(self):
         pass
     @staticmethod
+    def symmetries():
+        return [-np.pi, 0, np.pi]
+    """
+    returns the intervals of rotation that are identical, at least enough to be useful. 
+    The triangle can't be rotated but the rectangle can be inserted at any interval of 3.14
+    """
+    @staticmethod
     def tforms_to_pose(ids, tforms,goal=False):
-        import ipdb; ipdb.set_trace()
         if goal:
             rectangles_ids = [4,5,6,7]
         else:
@@ -56,7 +62,7 @@ class Robot():
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
-        self.contact_threshold = -1.5 # less than is in contact
+        self.contact_threshold = -3.5 # less than is in contact
         self.bad_model_states = []
         self.good_model_states = []
         self.shape_to_goal_loc = {}
@@ -77,7 +83,6 @@ class Robot():
     def detect_ar_world_pos(self,ids, straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
-        import ipdb; ipdb.set_trace()
         detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
 
         detected_ids = []
@@ -97,14 +102,12 @@ class Robot():
     def grasp_shape(self,T_tag_world, shape_type):
        self.holding_type = shape_type
        x_offset = 0
-       z_offset = 0.01
+       z_offset = 0.025
        start = fa.get_pose()
-       #T_tag_tool = T_tag_world.inverse() #reverses the rotation applied by the object
-       #T_tag_tool.translation = [x_offset, 0, z_offset]
-       
        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, z_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
        T_tool_world = T_tag_world * T_tag_tool.inverse()
+       self.original_object_rotation = T_tool_world.copy() #save this for when we insert it 
        T_tool_world.rotation = start.rotation
        fa.open_gripper()
        path = self.linear_interp_planner(start, T_tool_world)
@@ -122,17 +125,29 @@ class Robot():
                                     to_frame="franka_tool")
         T_tool_world = T_tag_world * T_tag_tool.inverse()
         start = fa.get_pose()
+        #set rotation to closest rotation in symmetry to pose
+        start_yaw = self.original_object_rotation.euler_angles[-1] #yaw we're at right now
+        planned_yaw = T_tool_world.euler_angles[-1] #yaw we need to go to 
+        symmetries = self.holding_type.symmetries()
+        best_symmetry_idx = np.argmin([np.linalg.norm((planned_yaw+sym)-start_yaw ) for sym in symmetries]) #wraparound :c
+        best_correct_yaw = symmetries[best_symmetry_idx]
+        good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
+        T_tool_world.rotation = np.dot(start.rotation,good_rotation)
         path = self.linear_interp_planner(start, T_tool_world)
-        self.follow_traj(path)
+        self.follow_traj(path, cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
+        z_down_offset = 0.01
+        T_tool_world.translation[-1] -= z_down_offset
+        self.follow_traj([T_tool_world], cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
+        
 
-    def follow_traj(self, path):
+    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300):
         for pt, i in zip(path, range(len(path))):
             new_pos = pt
             expect_contact = False
             if new_pos.translation[2] < 0.04:
                 expect_contact = True
 
-            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2500, 2500, 2500, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #consider breaking this one up to make it smoother
             force = self.feelforce()
@@ -171,7 +186,7 @@ class Robot():
     def get_shape_goal_location(self, shape_type):
         goal_ids = self.shape_goal_type_to_ids[shape_type]
         if shape_type not in self.shape_to_goal_loc.keys():
-            goal_loc = self.detect_ar_world_pos(goal_ids, shape_class = Rectangle, goal=True, straighten=False)
+            goal_loc = self.detect_ar_world_pos(goal_ids, shape_class = Rectangle, goal=True, straighten=True)
             self.shape_to_goal_loc[shape_type] = goal_loc
         return self.shape_to_goal_loc[shape_type]
 
@@ -214,11 +229,11 @@ class Robot():
             elif val == "c":
                 rt.translation[-1] -= delta
             elif val == "q":
-                rt_rot = RigidTransform.z_axis_rotation(0.1)
-                rt = rt.apply(rt_rot)
+                rt_rot = RigidTransform.z_axis_rotation(angle_delta)
+                rt.rotation = np.dot(rt.rotation, rt_rot)
             elif val == "e":
-                rt_rot = RigidTransform.z_axis_rotation(-0.1)
-                rt = rt.apply(rt_rot)
+                rt_rot = RigidTransform.z_axis_rotation(-angle_delta)
+                rt.rotation = np.dot(rt.rotation, rt_rot)
             elif val == 'k':
                 delta *= 2
                 angle_delta *= 2
@@ -226,7 +241,7 @@ class Robot():
                 delta /= 2
                 angle_delta /=2
             
-            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[600, 600, 400, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[800, 800, 500, 200, 200, 200]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #fa.goto_pose(rt)
             time.sleep(0.05)
 
@@ -243,12 +258,12 @@ def straighten_transform(rt):
 
 if __name__ == "__main__":
     robot = Robot()
+    import ipdb; ipdb.set_trace()
     fa.open_gripper()
     fa.reset_joints()
     import ipdb; ipdb.set_trace()
     shape_center = robot.get_shape_location(Rectangle)
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     robot.grasp_shape(shape_center, Rectangle)
-    import ipdb; ipdb.set_trace()
     robot.insert_shape()
     robot.keyboard_teleop()
