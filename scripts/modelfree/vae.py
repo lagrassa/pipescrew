@@ -53,10 +53,11 @@ def sampling(args):
     epsilon = K.random_normal(shape=(batch, dim))
     return z_mean + K.exp(0.5 * z_log_var) * epsilon
 
-def make_dsae(image_size_x=None, image_size_y=None):
+def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     original_dim = image_size_x * image_size_y
+    output_dim = image_size_x*image_size_y
     # network parameters 640x360 image
-    input_shape = (image_size_x,image_size_y, 3)
+    input_shape = (image_size_x,image_size_y, n_channels)
     intermediate_dim = 512
     latent_dim = 120
 
@@ -66,13 +67,10 @@ def make_dsae(image_size_x=None, image_size_y=None):
     x = kl.Conv2D(64,(7,7), padding="same")(inputs)
     x = kl.Conv2D(32, (5,5), padding="same")(x)
     x = kl.Conv2D(16, (5,5), padding="same")(x)
-    x = tf.contrib.layers.spatial_softmax(x)
-    x = kl.Flatten()(x)
+    x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
+    #x = kl.Flatten()(x)
     x = Dense(latent_dim)(x)
-    x = kl.Conv2D(16, (5,5), padding="same")(x)
-    x = kl.Conv2D(32, (5,5), padding="same")(x)
-    x = kl.Conv2D(64,(7,7), padding = "same")(inputs)
-
+    x = Dense(image_size_x*image_size_y)(x)
     z_mean = Dense(latent_dim, name='z_mean')(x)
     z_log_var = Dense(latent_dim, name='z_log_var')(x)
     # use reparameterization trick to push the sampling out as input
@@ -83,7 +81,7 @@ def make_dsae(image_size_x=None, image_size_y=None):
     # build decoder model
     latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
     x = Dense(intermediate_dim, activation='relu')(latent_inputs)
-    outputs = Dense(original_dim, activation='sigmoid')(x)
+    outputs = Dense(output_dim, activation='sigmoid')(x)
     # instantiate decoder model
     decoder = Model(latent_inputs, outputs, name='decoder')
     decoder.summary()
