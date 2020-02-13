@@ -29,6 +29,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import os
+import keras.layers as kl
+import tensorflow as tf
 
 
 # reparameterization trick
@@ -51,17 +53,26 @@ def sampling(args):
     epsilon = K.random_normal(shape=(batch, dim))
     return z_mean + K.exp(0.5 * z_log_var) * epsilon
 
-def make_vae(image_size=None):
-    original_dim = image_size * image_size
-    # network parameters
-    input_shape = (original_dim,)
+def make_dsae(image_size_x=None, image_size_y=None):
+    original_dim = image_size_x * image_size_y
+    # network parameters 640x360 image
+    input_shape = (image_size_x,image_size_y, 3)
     intermediate_dim = 512
-    latent_dim = 2
+    latent_dim = 120
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
-    x = Dense(intermediate_dim, activation='relu')(inputs)
+    x = kl.Conv2D(64,(7,7), padding="same")(inputs)
+    x = kl.Conv2D(32, (5,5), padding="same")(x)
+    x = kl.Conv2D(16, (5,5), padding="same")(x)
+    x = tf.contrib.layers.spatial_softmax(x)
+    x = kl.Flatten()(x)
+    x = Dense(latent_dim)(x)
+    x = kl.Conv2D(16, (5,5), padding="same")(x)
+    x = kl.Conv2D(32, (5,5), padding="same")(x)
+    x = kl.Conv2D(64,(7,7), padding = "same")(inputs)
+
     z_mean = Dense(latent_dim, name='z_mean')(x)
     z_log_var = Dense(latent_dim, name='z_log_var')(x)
     # use reparameterization trick to push the sampling out as input
@@ -83,6 +94,38 @@ def make_vae(image_size=None):
     vae = Model(inputs, outputs, name='vae_mlp')
     return vae, encoder, decoder, inputs, outputs, output_tensors
 
+def make_vae(image_size=None):
+    original_dim = image_size * image_size
+    # network parameters
+    input_shape = (original_dim, )
+    intermediate_dim = 512
+    latent_dim = 32
+
+    # VAE model = encoder + decoder
+    # build encoder model
+    inputs = Input(shape=input_shape, name='encoder_input')
+
+    x = Dense(intermediate_dim, activation='relu')(inputs)
+    z_mean = Dense(latent_dim, name='z_mean')(x)
+    z_log_var = Dense(latent_dim, name='z_log_var')(x)
+    # use reparameterization trick to push the sampling out as input
+    # note that "output_shape" isn't necessary with the TensorFlow backend
+    z = Lambda(sampling, output_shape=(latent_dim,), name='z')([z_mean, z_log_var])
+    # instantiate encoder model
+    encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
+    # build decoder model
+    latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
+    x = Dense(intermediate_dim, activation='relu')(latent_inputs)
+    outputs = Dense(original_dim, activation='sigmoid')(x)
+    # instantiate decoder model
+    decoder = Model(latent_inputs, outputs, name='decoder')
+    decoder.summary()
+
+    # instantiate VAE model
+    outputs = decoder(encoder(inputs)[2])
+    output_tensors = [z_mean, z_log_var, z]
+    vae = Model(inputs, outputs, name='vae_mlp')
+    return vae, encoder, decoder, inputs, outputs, output_tensors
 def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epochs = 50):
     x_train = training_data[:n_train, :]
     x_test = training_data[n_train:, :]
