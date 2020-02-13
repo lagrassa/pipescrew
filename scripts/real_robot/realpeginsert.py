@@ -27,18 +27,24 @@ class Rectangle:
     def __init__(self):
         pass
     @staticmethod
-    def tforms_to_pose(ids, tforms):
-        rectangles_ids = [0,1,2,3]
-        ids = [ar_id for ar_id in ids if ar_ids in rectangle_ids]
+    def tforms_to_pose(ids, tforms,goal=False):
+        import ipdb; ipdb.set_trace()
+        if goal:
+            rectangles_ids = [4,5,6,7]
+        else:
+            rectangles_ids = [0,1,2,3]
+        relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
+        tforms = np.array(tforms)[np.array(relevant_ids)]
+
         avg_rotation = tforms[0]
         for i in range(1, len(tforms)):
             avg_rotation = avg_rotation.interpolate_with(tforms[i], 0.5)
 
-        if len(ids) == 4:
+        if len(relevant_ids) == 4:
             translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
-        elif 0 in ids and 2 in ids:
+        elif 0 in relevant_ids and 2 in relevant_ids:
             translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
-        elif 1 in ids and 3 in ids:
+        elif 1 in relevant_ids and 3 in relevant_ids:
             translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
         else:
             print("Not enough detections to make accurate pose estimate")
@@ -65,33 +71,40 @@ class Robot():
         self.sensor.start()
         self.april = AprilTagDetector(self.cfg['april_tag'])
         # intr = sensor.color_intrinsics #original
-        self.intr = CameraIntrinsics('k4a', 972.31787109375, 971.8189086914062,
-                                1022.3043212890625, 777.7421875, height=1536, width=2048)
+        self.intr = CameraIntrinsics('k4a', 970.4990844726562,970.1990966796875, 1025.4967041015625, 777.769775390625, height=1536, width=2048)
+                                 
 
-    def detect_ar_world_pos(self,ids, straighten=True, shape_class = Rectangle):
+    def detect_ar_world_pos(self,ids, straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
+        import ipdb; ipdb.set_trace()
         detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
+
         detected_ids = []
         for new_detection in detections:
             detected_ids.append(int(new_detection.from_frame.split("/")[1])) #won't work for non-int values
             T_tag_cameras.append(new_detection)
-        T_tag_camera = shape_class.tforms_to_pose(detected_ids, T_tag_cameras) #as if there were a tag in the center
+        T_tag_camera = shape_class.tforms_to_pose(detected_ids, T_tag_cameras, goal=goal) #as if there were a tag in the center
         T_tag_world = self.T_camera_world * T_tag_camera
         if straighten:
             T_tag_world  = straighten_transform(T_tag_world)
+        print("detected pose", np.round(T_tag_world.translation,2))
+
         return T_tag_world
     """
     Goes to shape center and then grasps it 
     """
     def grasp_shape(self,T_tag_world, shape_type):
        self.holding_type = shape_type
-       x_offset = -0.02
-       z_offset = 0.09
+       x_offset = 0
+       z_offset = 0.01
+       start = fa.get_pose()
+       #T_tag_tool = T_tag_world.inverse() #reverses the rotation applied by the object
+       #T_tag_tool.translation = [x_offset, 0, z_offset]
+       
        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, z_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
        T_tool_world = T_tag_world * T_tag_tool.inverse()
-       start = fa.get_pose()
        T_tool_world.rotation = start.rotation
        fa.open_gripper()
        path = self.linear_interp_planner(start, T_tool_world)
@@ -119,7 +132,7 @@ class Robot():
             if new_pos.translation[2] < 0.04:
                 expect_contact = True
 
-            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2000, 2000, 1000, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[2500, 2500, 2500, 300, 300, 300]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #consider breaking this one up to make it smoother
             force = self.feelforce()
@@ -158,7 +171,7 @@ class Robot():
     def get_shape_goal_location(self, shape_type):
         goal_ids = self.shape_goal_type_to_ids[shape_type]
         if shape_type not in self.shape_to_goal_loc.keys():
-            goal_loc = self.detect_ar_world_pos(goal_ids)
+            goal_loc = self.detect_ar_world_pos(goal_ids, shape_class = Rectangle, goal=True, straighten=False)
             self.shape_to_goal_loc[shape_type] = goal_loc
         return self.shape_to_goal_loc[shape_type]
 
@@ -230,10 +243,12 @@ def straighten_transform(rt):
 
 if __name__ == "__main__":
     robot = Robot()
+    fa.open_gripper()
     fa.reset_joints()
     import ipdb; ipdb.set_trace()
     shape_center = robot.get_shape_location(Rectangle)
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     robot.grasp_shape(shape_center, Rectangle)
+    import ipdb; ipdb.set_trace()
     robot.insert_shape()
     robot.keyboard_teleop()
