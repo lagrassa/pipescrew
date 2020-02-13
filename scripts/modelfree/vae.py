@@ -55,18 +55,22 @@ def sampling(args):
 
 def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     original_dim = image_size_x * image_size_y
-    output_dim = image_size_x*image_size_y
+    output_dim = image_size_x*image_size_y*n_channels
     # network parameters 640x360 image
-    input_shape = (image_size_x,image_size_y, n_channels)
+    input_shape = (image_size_x*image_size_y*n_channels,)
     intermediate_dim = 512
     latent_dim = 120
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
-    x = kl.Conv2D(64,(7,7), padding="same")(inputs)
-    x = kl.Conv2D(32, (5,5), padding="same")(x)
-    x = kl.Conv2D(16, (5,5), padding="same")(x)
+    x = kl.Reshape((image_size_x, image_size_y, n_channels))(inputs)
+    x = kl.Conv2D(16,(2,2), padding="same")(x)
+    x = kl.Conv2D(8, (2,2), padding="same")(x)
+    x = kl.Conv2D(4, (2,2), padding="same")(x)
+    #x = kl.Conv2D(64,(7,7), padding="same")(x)
+    #x = kl.Conv2D(32, (5,5), padding="same")(x)
+    #x = kl.Conv2D(16, (5,5), padding="same")(x)
     x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
     #x = kl.Flatten()(x)
     x = Dense(latent_dim)(x)
@@ -81,9 +85,9 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     # build decoder model
     latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
     x = Dense(intermediate_dim, activation='relu')(latent_inputs)
-    outputs = Dense(output_dim, activation='sigmoid')(x)
+    x = Dense(output_dim, activation='sigmoid')(x)
     # instantiate decoder model
-    decoder = Model(latent_inputs, outputs, name='decoder')
+    decoder = Model(latent_inputs, x, name='decoder')
     decoder.summary()
 
     # instantiate VAE model
@@ -92,8 +96,9 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     vae = Model(inputs, outputs, name='vae_mlp')
     return vae, encoder, decoder, inputs, outputs, output_tensors
 
-def make_vae(image_size=None):
-    original_dim = image_size * image_size
+def make_vae(image_size=None, original_dim=None):
+    if original_dim is None:
+        original_dim = image_size * image_size
     # network parameters
     input_shape = (original_dim, )
     intermediate_dim = 512
@@ -129,9 +134,13 @@ def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epo
     x_test = training_data[n_train:, :]
     x_train = x_train.astype('float32') / 255
     x_test = x_test.astype('float32') / 255
-    image_size = x_train.shape[1]
+    if len(x_train.shape) == 3:
+        image_size = x_train.shape[1]
+        original_dim = image_size * image_size
+    else:
+        original_dim = x_train.shape[1]
+
     z_mean, z_log_var, z = output_tensors
-    original_dim = image_size * image_size
     reconstruction_loss = mse(inputs, outputs)
     reconstruction_loss *= original_dim
     kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
@@ -144,11 +153,10 @@ def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epo
     plot_model(vae,
                to_file='vae_mlp.png',
                show_shapes=True)
-    batch_size = 128
+    batch_size = None
     vae.fit(x_train,
             epochs=n_epochs,
-            batch_size=batch_size,
-            validation_data=(x_test, None))
+            batch_size=batch_size)
 
 def plot_results(models,
                  data,
