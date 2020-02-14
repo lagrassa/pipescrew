@@ -1,9 +1,11 @@
 from frankapy import FrankaArm
 import rospy
+import cv_bridge
 import time
 #rospy.init_node("planorparam")
 import numpy as np
 from franka_action_lib.srv import GetCurrentRobotStateCmd
+from franka_action_lib.msg import RobotState
 from autolab_core import RigidTransform
 import GPy as gpy
 from autolab_core import RigidTransform, YamlConfig
@@ -13,6 +15,7 @@ from perception_utils.apriltags import AprilTagDetector
 from perception_utils.realsense import get_first_realsense_sensor
 
 from perception import Kinect2SensorFactory, KinectSensorBridged
+from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
 
 from frankapy import FrankaArm
@@ -65,6 +68,7 @@ class Robot():
         self.contact_threshold = -3.5 # less than is in contact
         self.bad_model_states = []
         self.good_model_states = []
+        self.bridge = cv_bridge.CvBridge()
         self.shape_to_goal_loc = {}
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
         self.shape_goal_type_to_ids = {Rectangle:1}
@@ -120,7 +124,7 @@ class Robot():
     def insert_shape(self):
         #find corresponding hole and orientation
         T_tag_world = self.get_shape_goal_location( self.holding_type)
-        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.02],
+        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.03],
                                     from_frame=T_tag_world.from_frame,
                                     to_frame="franka_tool")
         T_tool_world = T_tag_world * T_tag_tool.inverse()
@@ -135,7 +139,7 @@ class Robot():
         T_tool_world.rotation = np.dot(start.rotation,good_rotation)
         path = self.linear_interp_planner(start, T_tool_world)
         self.follow_traj(path, cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
-        z_down_offset = 0.01
+        z_down_offset = 0.02
         T_tool_world.translation[-1] -= z_down_offset
         self.follow_traj([T_tool_world], cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
         
@@ -144,7 +148,7 @@ class Robot():
         for pt, i in zip(path, range(len(path))):
             new_pos = pt
             expect_contact = False
-            if new_pos.translation[2] < 0.04:
+            if new_pos.translation[2] < 0.01:
                 expect_contact = True
 
             fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
@@ -169,6 +173,9 @@ class Robot():
                 self.good_model_states.append(path[i-1])
             np.save("data/bad_model_states.npy", self.bad_model_states)
             np.save("data/good_model_states.npy", self.good_model_states)
+            if model_deviation:
+                print("Ending MB policy due to model deviation")
+                return
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
@@ -203,6 +210,42 @@ class Robot():
         ros_data = self._get_current_robot_state().robot_state
         force = ros_data.O_F_ext_hat_K
         return force[2]
+    def kinesthetic_teaching(self, prefix="test"):
+        time = 8
+        do_intel = True
+        do_kinect = True
+        self.ee_infos = []
+        if do_intel:
+            intel_data = None
+            self.intel_camera_images = []
+            def callback_intel(data):
+                image = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
+                self.intel_camera_images.append(image)
+            self.intel_subscriber = rospy.Subscriber("/camera/color/image_raw", Image, callback_intel)
+        if do_kinect:
+            kinect_data = None
+            self.kinect_camera_images = []
+            def callback_kinect(data):
+                image = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
+                self.kinect_camera_images.append(image)
+            self.kinect_subscriber = rospy.Subscriber("/rgb/image_raw", Image, callback_kinect)
+
+        def callback_ee(data):
+            ee_state = data.O_T_EE
+            self.ee_infos.append(ee_state)
+
+        self.ee_subscriber = rospy.Subscriber("/robot_state_publisher_node_1/robot_state", RobotState, callback_ee)
+        input("Beginning kinesthetic teaching. Ready?")
+        fa.apply_effector_forces_torques(time, 0, 0, 0)
+        np.save("data/"+str(prefix)+"ee_data.npy", self.ee_infos)
+        self.ee_subscriber.unregister()
+        if do_intel:
+            np.save("data/"+str(prefix)+"intel_data.npy", self.intel_camera_images)
+
+            self.intel_subscriber.unregister()
+        if do_kinect:
+            np.save("data/"+str(prefix)+"kinect_data.npy", self.kinect_camera_images)
+            self.kinect_subscriber.unregister()
 
     """
     Linear interpolation of poses, including quaternion
@@ -254,16 +297,21 @@ def straighten_transform(rt):
     new_rt = rt*roll_fix*pitch_fix
     return new_rt
 
+def run_insert_exp(robot, prefix):
+    fa.open_gripper()
+    fa.reset_joints()
+    shape_center = robot.get_shape_location(Rectangle)
+    robot.grasp_shape(shape_center, Rectangle)
+    robot.insert_shape()
+    robot.kinesthetic_teaching(prefix)
 
 
 if __name__ == "__main__":
+    n_exps = 3
     robot = Robot()
-    import ipdb; ipdb.set_trace()
     fa.open_gripper()
     fa.reset_joints()
-    import ipdb; ipdb.set_trace()
-    shape_center = robot.get_shape_location(Rectangle)
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    robot.grasp_shape(shape_center, Rectangle)
-    robot.insert_shape()
-    robot.keyboard_teleop()
+    for i in range(n_exps):
+        run_insert_exp(robot, i)
+    
