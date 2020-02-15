@@ -37,6 +37,7 @@ def test_kinect_ims():
     my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[-1])
     n_train = 10
     vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors)
+    my_vae.save_weights("test_weights.h5y")
 test_kinect_ims()
 
 
