@@ -59,15 +59,15 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     # network parameters 640x360 image
     input_shape = (image_size_x*image_size_y*n_channels,)
     intermediate_dim = 512
-    latent_dim = 120
+    latent_dim = 10
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
     x = kl.Reshape((image_size_x, image_size_y, n_channels))(inputs)
-    x = kl.Conv2D(16,(2,2), padding="same")(x)
-    x = kl.Conv2D(8, (2,2), padding="same")(x)
-    x = kl.Conv2D(4, (2,2), padding="same")(x)
+    x = kl.Conv2D(64,(7,7), padding="same")(x)
+    x = kl.Conv2D(32, (5,5), padding="same")(x)
+    x = kl.Conv2D(16, (5,5), padding="same")(x)
     ##x = kl.Conv2D(64,(7,7), padding="same")(x)
     ##x = kl.Conv2D(32, (5,5), padding="same")(x)
     ##x = kl.Conv2D(16, (5,5), padding="same")(x)
