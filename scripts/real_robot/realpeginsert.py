@@ -78,6 +78,10 @@ class Robot():
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
         self.sensor = Kinect2SensorFactory.sensor('bridged', self.cfg)  # Kinect sensor object
+        prefix = "/overhead"
+        self.sensor.topic_image_color  = prefix+self.sensor.topic_image_color
+        self.sensor.topic_image_depth  = prefix+self.sensor.topic_image_depth
+        self.sensor.topic_info_camera  = prefix+self.sensor.topic_info_camera
         self.sensor.start()
         self.april = AprilTagDetector(self.cfg['april_tag'])
         # intr = sensor.color_intrinsics #original
@@ -124,7 +128,7 @@ class Robot():
     def insert_shape(self):
         #find corresponding hole and orientation
         T_tag_world = self.get_shape_goal_location( self.holding_type)
-        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.03],
+        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.05],
                                     from_frame=T_tag_world.from_frame,
                                     to_frame="franka_tool")
         T_tool_world = T_tag_world * T_tag_tool.inverse()
@@ -138,7 +142,7 @@ class Robot():
         good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
         T_tool_world.rotation = np.dot(start.rotation,good_rotation)
         path = self.linear_interp_planner(start, T_tool_world)
-        self.follow_traj(path, cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
+        self.follow_traj(path, cart_gain = 1200, z_cart_gain = 1200, rot_cart_gain=150)
         z_down_offset = 0.02
         T_tool_world.translation[-1] -= z_down_offset
         self.follow_traj([T_tool_world], cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
@@ -211,10 +215,13 @@ class Robot():
         force = ros_data.O_F_ext_hat_K
         return force[2]
     def kinesthetic_teaching(self, prefix="test"):
-        time = 8
-        do_intel = True
+        time = 4
+        do_intel = False
         do_kinect = True
         self.ee_infos = []
+        def callback_ee(data):
+            ee_state = data.O_T_EE
+            self.ee_infos.append(ee_state)
         if do_intel:
             intel_data = None
             self.intel_camera_images = []
@@ -228,17 +235,14 @@ class Robot():
             def callback_kinect(data):
                 image = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
                 self.kinect_camera_images.append(image)
-            self.kinect_subscriber = rospy.Subscriber("/rgb/image_raw", Image, callback_kinect)
+                ee_data= rospy.wait_for_message("/robot_state_publisher_node_1/robot_state", RobotState)
+                callback_ee(ee_data) #helps in syncing
+            self.kinect_subscriber = rospy.Subscriber("/frontdown/rgb/image_raw", Image, callback_kinect)
 
-        def callback_ee(data):
-            ee_state = data.O_T_EE
-            self.ee_infos.append(ee_state)
 
-        self.ee_subscriber = rospy.Subscriber("/robot_state_publisher_node_1/robot_state", RobotState, callback_ee)
         input("Beginning kinesthetic teaching. Ready?")
         fa.apply_effector_forces_torques(time, 0, 0, 0)
         np.save("data/"+str(prefix)+"ee_data.npy", self.ee_infos)
-        self.ee_subscriber.unregister()
         if do_intel:
             np.save("data/"+str(prefix)+"intel_data.npy", self.intel_camera_images)
 
@@ -300,6 +304,7 @@ def straighten_transform(rt):
 def run_insert_exp(robot, prefix):
     fa.open_gripper()
     fa.reset_joints()
+    input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
     robot.grasp_shape(shape_center, Rectangle)
     robot.insert_shape()
@@ -312,6 +317,6 @@ if __name__ == "__main__":
     fa.open_gripper()
     fa.reset_joints()
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in range(n_exps):
+    for i in [3,4,5]:
         run_insert_exp(robot, i)
     

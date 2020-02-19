@@ -58,22 +58,24 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     output_dim = image_size_x*image_size_y*n_channels
     # network parameters 640x360 image
     input_shape = (image_size_x*image_size_y*n_channels,)
-    intermediate_dim = 512
-    latent_dim = 10
+    intermediate_dim = 30
+    latent_dim = 100
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
     x = kl.Reshape((image_size_x, image_size_y, n_channels))(inputs)
-    x = kl.Conv2D(64,(7,7), padding="same")(x)
-    x = kl.Conv2D(32, (5,5), padding="same")(x)
-    x = kl.Conv2D(16, (5,5), padding="same")(x)
+    x = kl.Conv2D(32,(3,3), padding="same")(x)
+    x = kl.Conv2D(16, (2,2), padding="same")(x)
+    x = kl.Conv2D(16, (2,2), padding="same")(x)
+    x = kl.GaussianNoise(0.001)(x)
     ##x = kl.Conv2D(64,(7,7), padding="same")(x)
     ##x = kl.Conv2D(32, (5,5), padding="same")(x)
     ##x = kl.Conv2D(16, (5,5), padding="same")(x)
     x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
     #x = kl.Flatten()(x)
     x = Dense(latent_dim)(inputs)
+    x = kl.Dropout(0.2)(x)
     x = Dense(image_size_x*image_size_y)(x)
     z_mean = Dense(latent_dim, name='z_mean')(x)
     z_log_var = Dense(latent_dim, name='z_log_var')(x)
@@ -128,11 +130,9 @@ def make_vae(image_size=None, original_dim=None):
     output_tensors = [z_mean, z_log_var, z]
     vae = Model(inputs, outputs, name='vae_mlp')
     return vae, encoder, decoder, inputs, outputs, output_tensors
-def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epochs = 50):
-    x_train = training_data[:n_train, :]
-    x_test = training_data[n_train:, :]
+def train_vae(vae, training_data, validation_split, inputs, outputs, output_tensors,n_epochs = 50):
+    x_train = training_data
     x_train = x_train.astype('float32') / 255
-    x_test = x_test.astype('float32') / 255
     if len(x_train.shape) == 3:
         image_size = x_train.shape[1]
         original_dim = image_size * image_size
@@ -155,6 +155,7 @@ def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epo
     batch_size = None
     vae.fit(x_train,
             epochs=n_epochs,
+            validation_split=validation_split,
             batch_size=batch_size)
 
 def plot_results(models,
