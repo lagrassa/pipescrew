@@ -25,8 +25,8 @@ def test_behaviour_cloning():
     il_policy = ILPolicy(encoded_camera_data, joint_data)
     il_policy.train_model(encoded_camera_data, joint_data, n_epochs = 200 )
     thresh = 0.05
-    for i in range(len(joint_data)):
-        proposed_joints = il_policy(encoded_camera_data[i,:])
+    for i in range(len(joint_data)-1):
+        proposed_joints = il_policy(encoded_camera_data[i-1,:])
         actual_joints = joint_data[i]
         if (np.linalg.norm(proposed_joints-actual_joints)< thresh):
             print("Found big error of", np.linalg.norm(proposed_joints-actual_joints))
