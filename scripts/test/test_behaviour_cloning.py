@@ -6,8 +6,8 @@ from modelfree.ILPolicy import ILPolicy
 from modelfree import vae
 
 def test_behaviour_cloning():
-    camera_data_raw = np.load("data/kinect_data_short.npy")
-    joint_data = np.load("data/ee_data_short.npy")
+    camera_data_raw = np.load("data/0kinect_data.npy")
+    joint_data = np.load("data/0ee_data.npy")
     width = 80
     height = 50
     camera_data = np.zeros((camera_data_raw.shape[0], width, height,1))
