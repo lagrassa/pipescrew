@@ -14,7 +14,7 @@ class ILPolicy:
         return self.model.predict(obs.reshape(1,-1))
 
     def train_model(self,observation_data, action_data, n_epochs = 1):
-        self.model.fit(observation_data, action_data, epochs = n_epochs)
+        self.model.fit(observation_data[:-1], action_data[1:], epochs = n_epochs)
 
     def make_model(self, obs_shape, act_shape):
         input_shape = obs_shape
