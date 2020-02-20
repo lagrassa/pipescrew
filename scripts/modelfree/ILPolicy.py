@@ -8,8 +8,8 @@ class ILPolicy:
     observations expected to be in some autoencoded format
     """
     def __init__(self, observation_data, action_data, load_fn=None):
-        observation_data_shape = observation_data.shape[1:]
         action_data = process_action_data(action_data)
+        observation_data_shape = np.hstack([observation_data, action_data]).shape[1:]
         action_data_shape = action_data.shape[1]
         #also add the current action data
         self.make_model(observation_data_shape, action_data_shape)
@@ -21,15 +21,17 @@ class ILPolicy:
 
     def save_model(self, fn):
         self.model.save_weights(fn)
-    def train_model(self,observation_data, action_data, n_epochs = 1, validation_split = 0.99):
+    def train_model(self,observation_data, action_data, n_epochs = 1, validation_split = 0.95):
         action_data = process_action_data(action_data)
-        self.model.fit(observation_data[:-1], action_data[1:], epochs = n_epochs, validation_split=validation_split)
+        input_data = np.hstack([observation_data[:-1],action_data[:-1]]) 
+        self.model.fit(input_data, action_data[1:], epochs = n_epochs, validation_split=validation_split)
 
     def make_model(self, obs_shape, act_shape):
         input_shape = obs_shape
         inputs = kl.Input(shape=input_shape, name='encoder_input')
         x = kl.Dense(64)(inputs)
         x = kl.Dropout(0.5)(x)
+        x = kl.GaussianNoise(0.00001)(x)
         x = kl.Dense(32)(x)
         x = kl.Dropout(0.5)(x)
         x = kl.Dense(16)(x)

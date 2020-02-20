@@ -59,7 +59,7 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     # network parameters 640x360 image
     input_shape = (image_size_x*image_size_y*n_channels,)
     intermediate_dim = 30
-    latent_dim = 100
+    latent_dim = 20
 
     # VAE model = encoder + decoder
     # build encoder model

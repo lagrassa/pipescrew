@@ -13,7 +13,8 @@ from visualization import Visualizer3D as vis3d
 
 from perception_utils.apriltags import AprilTagDetector
 from perception_utils.realsense import get_first_realsense_sensor
-
+from modelfree import processimgs, vae
+from modelfree.ILPolicy import ILPolicy, process_action_data
 from perception import Kinect2SensorFactory, KinectSensorBridged
 from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
@@ -43,19 +44,23 @@ class Rectangle:
         else:
             rectangles_ids = [0,1,2,3]
         relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
-        tforms = np.array(tforms)[np.array(relevant_ids)]
-
-        avg_rotation = tforms[0]
-        for i in range(1, len(tforms)):
-            avg_rotation = avg_rotation.interpolate_with(tforms[i], 0.5)
+        relevant_tforms = []
+        for id_num in relevant_ids:
+            tform_idx = ids.index(id_num)
+            relevant_tforms.append(tforms[tform_idx])
+        
+        avg_rotation = relevant_tforms[0]
+        for i in range(1, len(relevant_tforms)):
+            avg_rotation = avg_rotation.interpolate_with(relevant_tforms[i], 0.5)
 
         if len(relevant_ids) == 4:
-            translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
         elif 0 in relevant_ids and 2 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
         elif 1 in relevant_ids and 3 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in tforms]), axis=0)
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
         else:
+            print(relevant_ids)
             print("Not enough detections to make accurate pose estimate")
 
         return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
@@ -68,6 +73,8 @@ class Robot():
         self.contact_threshold = -3.5 # less than is in contact
         self.bad_model_states = []
         self.good_model_states = []
+        self.autoencoder = None
+        self.il_policy=None
         self.bridge = cv_bridge.CvBridge()
         self.shape_to_goal_loc = {}
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
@@ -86,9 +93,39 @@ class Robot():
         self.april = AprilTagDetector(self.cfg['april_tag'])
         # intr = sensor.color_intrinsics #original
         self.intr = CameraIntrinsics('k4a', 970.4990844726562,970.1990966796875, 1025.4967041015625, 777.769775390625, height=1536, width=2048)
-                                 
+        
+    """
+    executes the model-free policy
+    """
+    def modelfree(self, cart_gain =2000, z_cart_gain = 2000, rot_cart_gain = 300):
+        for i in range(30): #TODO put in a real termination condition
+            data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
+            img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
+            camera_data = processimgs.process_raw_camera_data(img.reshape((1,)+img.shape))
+            image = camera_data[0,:,:,:]
+            camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2] *camera_data.shape[3]))
+            if self.autoencoder is None:
+                my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[2])
+                my_vae.load_weights("test_weights.h5y")
+                self.autoencoder = encoder
 
-    def detect_ar_world_pos(self,ids, straighten=True, shape_class = Rectangle, goal=False):
+            encoded_camera_data = self.autoencoder.predict(camera_data)[0]
+            ee_data = np.array(rospy.wait_for_message("/robot_state_publisher_node_1/robot_state", RobotState).O_T_EE)
+            ee_data = ee_data.reshape((1,)+ee_data.shape)
+            if self.il_policy is None:
+                self.il_policy = ILPolicy(encoded_camera_data, ee_data, load_fn = "models/ilpolicy.h5y")
+            ee_data = process_action_data(ee_data)
+            next_ee_pos = self.il_policy(np.hstack([encoded_camera_data, ee_data]))
+            new_rot = RigidTransform.rotation_from_quaternion(next_ee_pos[0,3:])
+            next_pos = RigidTransform(translation=next_ee_pos[0,0:3], rotation=new_rot)
+            curr_rt = fa.get_pose()
+            #print("Delta pose", next_pos.translation - curr_rt.translation)
+            #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
+            #input("OK to go to pose difference from MF?")
+            next_pos.from_frame = "franka_tool"
+            fa.goto_pose_with_cartesian_control(next_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+
+    def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
         detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
@@ -111,6 +148,7 @@ class Robot():
        self.holding_type = shape_type
        x_offset = 0
        z_offset = 0.025
+       self.grasp_offset = 0.025
        start = fa.get_pose()
        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, z_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
@@ -128,7 +166,7 @@ class Robot():
     def insert_shape(self):
         #find corresponding hole and orientation
         T_tag_world = self.get_shape_goal_location( self.holding_type)
-        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.05],
+        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.0],
                                     from_frame=T_tag_world.from_frame,
                                     to_frame="franka_tool")
         T_tool_world = T_tag_world * T_tag_tool.inverse()
@@ -140,12 +178,21 @@ class Robot():
         best_symmetry_idx = np.argmin([np.linalg.norm((planned_yaw+sym)-start_yaw ) for sym in symmetries]) #wraparound :c
         best_correct_yaw = symmetries[best_symmetry_idx]
         good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
+        above_surface = 0.01
+        #go up first to avoid friction
+        curr_pos = fa.get_pose()
+        curr_pos.translation[-1] += above_surface
+        up_pose = curr_pos 
+        up_path = [up_pose]
+        self.follow_traj(up_path, cart_gain = 2200, z_cart_gain = 2200, rot_cart_gain=250)
         T_tool_world.rotation = np.dot(start.rotation,good_rotation)
-        path = self.linear_interp_planner(start, T_tool_world)
-        self.follow_traj(path, cart_gain = 1200, z_cart_gain = 1200, rot_cart_gain=150)
-        z_down_offset = 0.02
-        T_tool_world.translation[-1] -= z_down_offset
-        self.follow_traj([T_tool_world], cart_gain = 300, z_cart_gain = 300, rot_cart_gain=150)
+        above_T_tool_world = T_tool_world.copy()
+        above_T_tool_world.translation[-1] = fa.get_pose().translation[-1] #keep it at the same z
+        #now over where it needs to be and at the right place
+        path = self.linear_interp_planner(fa.get_pose(), above_T_tool_world)
+        self.follow_traj(path, cart_gain = 2200, z_cart_gain = 2200, rot_cart_gain=250)
+        T_tool_world.translation[-1] = self.grasp_offset
+        self.follow_traj([T_tool_world], cart_gain = 600, z_cart_gain = 600, rot_cart_gain=250)
         
 
     def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300):
@@ -195,15 +242,13 @@ class Robot():
 
 
     def get_shape_goal_location(self, shape_type):
-        goal_ids = self.shape_goal_type_to_ids[shape_type]
         if shape_type not in self.shape_to_goal_loc.keys():
-            goal_loc = self.detect_ar_world_pos(goal_ids, shape_class = Rectangle, goal=True, straighten=True)
+            goal_loc = self.detect_ar_world_pos(shape_class = Rectangle, goal=True, straighten=True)
             self.shape_to_goal_loc[shape_type] = goal_loc
         return self.shape_to_goal_loc[shape_type]
 
     def get_shape_location(self, shape_type):
-        shape_ids = self.shape_type_to_ids[shape_type]
-        return self.detect_ar_world_pos(shape_ids)
+        return self.detect_ar_world_pos(shape_class=shape_type)
     """
     moves arm back to pose where it's not in the way of the camera
     """
@@ -239,8 +284,7 @@ class Robot():
                 callback_ee(ee_data) #helps in syncing
             self.kinect_subscriber = rospy.Subscriber("/frontdown/rgb/image_raw", Image, callback_kinect)
 
-
-        input("Beginning kinesthetic teaching. Ready?")
+        input("Ready for kinesthetic teaching?")
         fa.apply_effector_forces_torques(time, 0, 0, 0)
         np.save("data/"+str(prefix)+"ee_data.npy", self.ee_infos)
         if do_intel:
@@ -301,14 +345,18 @@ def straighten_transform(rt):
     new_rt = rt*roll_fix*pitch_fix
     return new_rt
 
-def run_insert_exp(robot, prefix):
+
+def run_insert_exp(robot, prefix, training=True):
     fa.open_gripper()
     fa.reset_joints()
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
     robot.grasp_shape(shape_center, Rectangle)
     robot.insert_shape()
-    robot.kinesthetic_teaching(prefix)
+    if training: 
+        robot.kinesthetic_teaching(prefix)
+    else:
+        robot.modelfree()
 
 
 if __name__ == "__main__":
@@ -316,7 +364,8 @@ if __name__ == "__main__":
     robot = Robot()
     fa.open_gripper()
     fa.reset_joints()
+    input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [3,4,5]:
-        run_insert_exp(robot, i)
+    for i in [13, 14, 15]:
+        run_insert_exp(robot, i, training=False)
     
