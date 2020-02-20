@@ -26,15 +26,17 @@ def test_behaviour_cloning():
     my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[2])
     my_vae.load_weights("test_weights.h5y")
     encoded_camera_data = encoder.predict(camera_data)[0]
-    il_policy = ILPolicy(encoded_camera_data, ee_data)
-    il_policy.train_model(encoded_camera_data, ee_data, n_epochs = 6000, validation_split=0.05 )
+    ee_data = process_action_data(ee_data)
+    ee_deltas = ee_data[1:]-ee_data[:-1] #delta from last
+    il_policy = ILPolicy(encoded_camera_data, ee_deltas)
+    il_policy.train_model(encoded_camera_data, ee_deltas, n_epochs = 6000, validation_split=0.05 )
     thresh = 0.02
     errors = []
     ee_data = process_action_data(ee_data)
     for i in range(len(ee_data)-1):
-        proposed_joints = il_policy(encoded_camera_data[i-1,:])
-        actual_joints = ee_data[i]
-        error = np.linalg.norm(proposed_joints[0,0:3]-actual_joints[0:3])
+        proposed_delta = il_policy(encoded_camera_data[i-1,:])
+        actual_delta = ee_data[i+1]-ee_data[i]
+        error = np.linalg.norm(proposed_delta[0,0:3]-actual_delta[0:3])
         errors.append(error)
     print("Mean error", np.mean(errors))
     print("std error", np.std(errors))

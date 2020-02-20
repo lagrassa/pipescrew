@@ -8,7 +8,6 @@ class ILPolicy:
     observations expected to be in some autoencoded format
     """
     def __init__(self, observation_data, action_data, load_fn=None):
-        action_data = process_action_data(action_data)
         observation_data_shape = np.hstack([observation_data, action_data]).shape[1:]
         action_data_shape = action_data.shape[1]
         #also add the current action data
@@ -22,9 +21,8 @@ class ILPolicy:
     def save_model(self, fn):
         self.model.save_weights(fn)
     def train_model(self,observation_data, action_data, n_epochs = 1, validation_split = 0.95):
-        action_data = process_action_data(action_data)
-        input_data = np.hstack([observation_data[:-1],action_data[:-1]]) 
-        self.model.fit(input_data, action_data[1:], epochs = n_epochs, validation_split=validation_split)
+        input_data = np.hstack([observation_data[:-1],action_data])
+        self.model.fit(input_data, action_data, epochs = n_epochs, validation_split=validation_split)
 
     def make_model(self, obs_shape, act_shape):
         input_shape = obs_shape
