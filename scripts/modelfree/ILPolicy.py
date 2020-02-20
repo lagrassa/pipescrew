@@ -23,7 +23,7 @@ class ILPolicy:
         self.model.save_weights(fn)
     def train_model(self,observation_data, action_data, n_epochs = 1, validation_split = 0.99):
         action_data = process_action_data(action_data)
-        self.model.fit(observation_data, action_data, epochs = n_epochs, validation_split=validation_split)
+        self.model.fit(observation_data[:-1], action_data[1:], epochs = n_epochs, validation_split=validation_split)
 
     def make_model(self, obs_shape, act_shape):
         input_shape = obs_shape

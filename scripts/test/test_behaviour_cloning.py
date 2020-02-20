@@ -31,8 +31,8 @@ def test_behaviour_cloning():
     thresh = 0.02
     errors = []
     ee_data = process_action_data(ee_data)
-    for i in range(len(ee_data)):
-        proposed_joints = il_policy(encoded_camera_data[i,:])
+    for i in range(len(ee_data)-1):
+        proposed_joints = il_policy(encoded_camera_data[i-1,:])
         actual_joints = ee_data[i]
         error = np.linalg.norm(proposed_joints[0,0:3]-actual_joints[0:3])
         errors.append(error)
@@ -41,7 +41,6 @@ def test_behaviour_cloning():
     print("max error", np.max(errors))
     assert(np.max(errors) < 0.1)
     assert(np.mean(errors) < 0.01)
-
     il_policy.save_model("models/ilpolicy.h5y")
 
 test_behaviour_cloning()
