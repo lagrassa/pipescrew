@@ -9,9 +9,17 @@ from modelfree import vae
 def test_behaviour_cloning():
     camera_data_raw = np.load("data/0kinect_data.npy")
     ee_data = np.load("data/0ee_data.npy")
-    for i in range(1,4):
-        camera_data_raw = np.vstack([camera_data_raw, np.load("data/"+str(i)+"kinect_data.npy")])
-        ee_data = np.vstack([ee_data, np.load("data/"+str(i)+"ee_data.npy")])
+    n_waypoints = 5
+    for i in range(1,12):
+        new_raw_camera_data = np.load("data/"+str(i)+"kinect_data.npy")
+        mask = np.round(np.linspace(0,new_raw_camera_data.shape[0]-1,n_waypoints)).astype(np.int32)
+        new_raw_camera_data = new_raw_camera_data[mask]
+        camera_data_raw = np.vstack([camera_data_raw, new_raw_camera_data])
+        new_ee_data = np.load("data/"+str(i)+"ee_data.npy")
+        new_ee_data = new_ee_data[mask]
+        ee_data = np.vstack([ee_data, new_ee_data])
+
+
     camera_data = processimgs.process_raw_camera_data(camera_data_raw)
     image = camera_data[0,:,:,:]
     camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2] *camera_data.shape[3]))

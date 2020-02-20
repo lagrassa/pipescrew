@@ -11,6 +11,7 @@ class ILPolicy:
         observation_data_shape = observation_data.shape[1:]
         action_data = process_action_data(action_data)
         action_data_shape = action_data.shape[1]
+        #also add the current action data
         self.make_model(observation_data_shape, action_data_shape)
         if load_fn is not None:
             self.model.load_weights(load_fn)
