@@ -97,8 +97,8 @@ class Robot():
     """
     executes the model-free policy
     """
-    def modelfree(self, cart_gain =2000, z_cart_gain = 2000, rot_cart_gain = 300):
-        for i in range(30): #TODO put in a real termination condition
+    def modelfree(self, cart_gain =500, z_cart_gain = 500, rot_cart_gain = 100):
+        for i in range(50): #TODO put in a real termination condition
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
             camera_data = processimgs.process_raw_camera_data(img.reshape((1,)+img.shape))
@@ -112,18 +112,20 @@ class Robot():
             encoded_camera_data = self.autoencoder.predict(camera_data)[0]
             ee_data = np.array(rospy.wait_for_message("/robot_state_publisher_node_1/robot_state", RobotState).O_T_EE)
             ee_data = ee_data.reshape((1,)+ee_data.shape)
-            if self.il_policy is None:
-                self.il_policy = ILPolicy(encoded_camera_data, ee_data, load_fn = "models/ilpolicy.h5y")
             ee_data = process_action_data(ee_data)
-            next_ee_pos = self.il_policy(np.hstack([encoded_camera_data, ee_data]))
-            new_rot = RigidTransform.rotation_from_quaternion(next_ee_pos[0,3:])
-            next_pos = RigidTransform(translation=next_ee_pos[0,0:3], rotation=new_rot)
+            if self.il_policy is None:
+                self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, load_fn = "models/ilpolicy.h5y")
+            delta_ee_pos = self.il_policy(np.hstack([encoded_camera_data, ee_data]))
+            import ipdb; ipdb.set_trace()
+            new_rot = RigidTransform.rotation_from_quaternion(delta_ee_pos[0,3:])
+            delta_ee_rt = RigidTransform(translation=delta_ee_pos[0,0:3], rotation=new_rot)
             curr_rt = fa.get_pose()
             #print("Delta pose", next_pos.translation - curr_rt.translation)
             #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
             #input("OK to go to pose difference from MF?")
-            next_pos.from_frame = "franka_tool"
-            fa.goto_pose_with_cartesian_control(next_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            delta_ee_rt.from_frame = "franka_tool"
+            delta_ee_rt.to_frame = "franka_tool"
+            fa.goto_pose_delta(delta_ee_rt, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
 
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
@@ -147,14 +149,22 @@ class Robot():
     def grasp_shape(self,T_tag_world, shape_type):
        self.holding_type = shape_type
        x_offset = 0
-       z_offset = 0.025
        self.grasp_offset = 0.025
        start = fa.get_pose()
-       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, z_offset], from_frame="peg_center",
+       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, self.grasp_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
        T_tool_world = T_tag_world * T_tag_tool.inverse()
-       self.original_object_rotation = T_tool_world.copy() #save this for when we insert it 
-       T_tool_world.rotation = start.rotation
+       self.original_object_rotation = T_tool_world.copy()  
+       #find the closeset symmetry.  Probably should wrap in a function
+       start_yaw = start.euler_angles[-1] #yaw we're at right now
+       planned_yaw = T_tool_world.euler_angles[-1] #yaw we need to go to 
+       grasp_symmetries = [-np.pi,-np.pi/2, 0, np.pi/2, np.pi]
+       best_symmetry_idx = np.argmin([np.linalg.norm((planned_yaw+sym)-start_yaw ) for sym in grasp_symmetries]) #wraparound :c
+       best_correct_yaw = grasp_symmetries[best_symmetry_idx]
+       good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
+       T_tool_world.rotation = np.dot(good_rotation, start.rotation)
+       #T_tool_world.rotation = start.rotation
+       
        fa.open_gripper()
        path = self.linear_interp_planner(start, T_tool_world)
        self.follow_traj(path)
@@ -173,6 +183,7 @@ class Robot():
         start = fa.get_pose()
         #set rotation to closest rotation in symmetry to pose
         start_yaw = self.original_object_rotation.euler_angles[-1] #yaw we're at right now
+        #start_yaw = start.euler_angles[-1] #yaw we're at right now
         planned_yaw = T_tool_world.euler_angles[-1] #yaw we need to go to 
         symmetries = self.holding_type.symmetries()
         best_symmetry_idx = np.argmin([np.linalg.norm((planned_yaw+sym)-start_yaw ) for sym in symmetries]) #wraparound :c
@@ -302,11 +313,16 @@ class Robot():
         return start.linear_trajectory_to(goal, n_pts)
     def keyboard_teleop(self):
         print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
-        rt = fa.get_pose()
         delta = 0.01
-        angle_delta = 0.1
+        angle_delta = 0.03
+        delta_rts = []
+        imgs = []
+        ee_rts = []
         while True:
+            rt = RigidTransform(from_frame="franka_tool", to_frame="franka_tool")
             val = input()
+            data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
+            img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
             if val == "a":
                 rt.translation[0] -= delta
             elif val == "d":
@@ -328,13 +344,34 @@ class Robot():
             elif val == 'k':
                 delta *= 2
                 angle_delta *= 2
+                continue
             elif val == "j":
                 delta /= 2
                 angle_delta /=2
+                continue
+            elif val == "quit":
+                break
+            imgs.append(img) 
+            ee = fa.get_pose()
+            ee_rts.append(ee) 
+            fa.goto_pose_delta(rt, cartesian_impedances=[500, 500, 500, 100, 100, 100]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            delta_rts.append(rt)
+            transes = []
+            ee_transes = []
+            quats = []
+            ee_quats = []
+            for rt, ee_rt in zip(delta_rts, ee_rts):
+                transes.append(rt.translation)
+                ee_transes.append(ee_rt.translation)
+                quats.append(rt.quaternion)
+                ee_quats.append(ee_rt.quaternion)
             
-            fa.goto_pose_with_cartesian_control(rt, cartesian_impedances=[800, 800, 500, 200, 200, 200]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            #transform to the right way
             #fa.goto_pose(rt)
-            time.sleep(0.05)
+        img_result = np.zeros((len(imgs),)+imgs[0].shape)
+        for i in range(len(imgs)):
+            img_result[i,:,:] = imgs[i]
+        return np.hstack([np.vstack(transes), np.vstack(quats)]), img_result, np.hstack([np.vstack(ee_transes), np.vstack(ee_quats)])
 
 def straighten_transform(rt):
     angles = rt.euler_angles
@@ -354,7 +391,11 @@ def run_insert_exp(robot, prefix, training=True):
     robot.grasp_shape(shape_center, Rectangle)
     robot.insert_shape()
     if training: 
-        robot.kinesthetic_teaching(prefix)
+        #robot.kinesthetic_teaching(prefix)
+        actions, images, ees = robot.keyboard_teleop()
+        np.save("data/"+str(prefix)+"actions.npy", actions)
+        np.save("data/"+str(prefix)+"kinect_data.npy", images)
+        np.save("data/"+str(prefix)+"ee_data.npy", ees)
     else:
         robot.modelfree()
 
@@ -362,10 +403,14 @@ def run_insert_exp(robot, prefix, training=True):
 if __name__ == "__main__":
     n_exps = 3
     robot = Robot()
+    #res = robot.keyboard_teleop()
+    robot.modelfree()
+    import ipdb; ipdb.set_trace()
     fa.open_gripper()
     fa.reset_joints()
+
     input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [13, 14, 15]:
-        run_insert_exp(robot, i, training=False)
+    for i in [0,1]:
+        run_insert_exp(robot, i, training=True)
     

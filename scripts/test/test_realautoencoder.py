@@ -9,7 +9,7 @@ def test_one_image():
     image = rgb2hsv(image)
     image = image[:,:,0]
     image = image.reshape(image.shape+(1,)) #compatible with 3 channels
-    n_images = 8
+    n_images = 18
     data = np.zeros((n_images,)+image.shape)
     for i in range(n_images):
         data[i,:,:,:] = image
@@ -22,7 +22,7 @@ def test_one_image():
 
 def test_kinect_ims():
     camera_data_raw = np.load("data/0kinect_data.npy")
-    for i in range(1,5):
+    for i in range(1,12):
         camera_data_raw = np.vstack([camera_data_raw, np.load("data/"+str(i)+"kinect_data.npy")])
 
     #width = 40
@@ -41,8 +41,8 @@ def test_kinect_ims():
     image = camera_data[0,:,:,:]
     camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2] *camera_data.shape[3]))
     my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[-1])
-    n_train = 0.05
-    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 300)
+    n_train = 0.03
+    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 1000)
 
     my_vae.save_weights("test_weights.h5y")
 test_kinect_ims()
