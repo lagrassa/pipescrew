@@ -28,7 +28,8 @@ class PegWorld():
     """
     def setup_robot(self):
         if not self.handonly:
-            self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
+            #self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
+            self.robot = p.loadURDF("../../models/robots/model.urdf")
             set_point(self.robot, (-0.4,0,0.005))
             start_joints = (0.09186411075857098, 0.02008522792588543, 0.03645461729775788, -1.9220854528910314, 0.213232566443952983, 1.647271913704007, 0.0, 0.0, 0.0)
             self.grasp_joint = 9
@@ -45,7 +46,9 @@ class PegWorld():
     """
     table with a hollow and solid cylinder on it
     """
-    def setup_workspace(self):
+    def setup_workspace(self, rectangle_loc = ((0,-0.2,0), (1,0,0,0)),
+            circle_loc = ((0,0.1,0),(1,0,0,0)),
+            obstacle_loc = ((0,0.05,0), (1,0,0,0)), board_loc = ((0,0,0),(1,0,0,0))):
         self.floor = p.loadURDF("../../models/short_floor.urdf")
         #make board
         width = 0.3
@@ -53,19 +56,19 @@ class PegWorld():
         height = 0.02
         block_height = 0.01
         self.board = ut.create_box(width, length, height) 
+        ut.set_pose(self.board, board_loc)
         #make circle
         radius = 0.02
         self.circle = ut.create_cylinder(radius, block_height)
-        #make square
-        square_side = 0.03
-        self.square =  ut.create_box(square_side, square_side, block_height, color=(0,0,1,1))
-        square_loc = (0,-0.2,0)
-        circle_loc = (0,0.1,0)
-        ut.set_point(self.square, square_loc)
-        ut.set_point(self.circle, square_loc)
+        #make rectangle
+        self.rectangle =  ut.create_box(0.04, 0.07, block_height, color=(0,0,1,1))
+        self.obstacle = ut.create_box(0.11, 0.11, 0.06, color = (0.5,0.5,0.5,1))
+        ut.set_pose(self.rectangle, rectangle_loc)
+        ut.set_pose(self.circle, circle_loc)
+        ut.set_pose(self.obstacle, obstacle_loc)
         self.shape_name_to_shape = {}
         self.shape_name_to_shape['circle'] = self.circle
-        self.shape_name_to_shape['square'] = self.square
+        self.shape_name_to_shape['rectangle'] = self.rectangle
 
     """
     Trajectory from current pose to goal considering attachments
@@ -90,7 +93,7 @@ class PegWorld():
         end_conf = end_conf[:len(joints_to_plan_for)]
         for attachment in self.in_hand:
             attachment.assign()
-        traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.square], attachments=self.in_hand,
+        traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.obstacle, self.rectangle], attachments=self.in_hand,
                       self_collisions=True, disabled_collisions=set(self.in_hand),
                       weights=None, resolutions=None)
         
@@ -107,7 +110,7 @@ class PegWorld():
         self.in_hand = []
 
 if __name__ == "__main__":
-    pw = PegWorld(visualize=True, handonly = False)
-    pw.attach_shape('circle', (np.array([0,0,0.05]), np.array([1,0,0,0])))
+    pw = PegWorld(visualize=False, handonly = False)
+    pw.attach_shape('rectangle', (np.array([0,0,0.05]), np.array([1,0,0,0])))
     traj = pw.make_traj(np.array([0,0.05,0.3]))
     print("trajectory", traj)
