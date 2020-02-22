@@ -18,7 +18,7 @@ from modelfree.ILPolicy import ILPolicy, process_action_data
 from perception import Kinect2SensorFactory, KinectSensorBridged
 from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
-
+from env.pegworld import PegWorld
 from frankapy import FrankaArm
 fa = FrankaArm()
 
@@ -80,7 +80,13 @@ class Robot():
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
         self.shape_goal_type_to_ids = {Rectangle:1}
         self.setup_perception()
-
+        self.setup_pbworld()
+    def setup_pbworld(self):
+        board_loc = ((0,0,0),(1,0,0,0))
+        circle_loc = ((0.3,0.2,0),(1,0,0,0)) #acquire from darknet
+        obstacle_loc = ((0.2,0.1,0),(1,0,0,0)) #TODO acquire from perception
+        rectangle_loc = self.get_shape_location(Rectangle)
+        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc)
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
@@ -116,6 +122,7 @@ class Robot():
             if self.il_policy is None:
                 self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, load_fn = "models/ilpolicy.h5y")
             delta_ee_pos = self.il_policy(np.hstack([encoded_camera_data, ee_data]))
+            print(np.round(delta_ee_pos, 2), "next pos")
             import ipdb; ipdb.set_trace()
             new_rot = RigidTransform.rotation_from_quaternion(delta_ee_pos[0,3:])
             delta_ee_rt = RigidTransform(translation=delta_ee_pos[0,0:3], rotation=new_rot)
@@ -203,6 +210,10 @@ class Robot():
         path = self.linear_interp_planner(fa.get_pose(), above_T_tool_world)
         self.follow_traj(path, cart_gain = 2200, z_cart_gain = 2200, rot_cart_gain=250)
         T_tool_world.translation[-1] = self.grasp_offset
+        avg_end_position = [ 0.53684655,  0.10351364,  0.02622978, -0.00137794,  0.9999593 ,
+                       -0.00405089, -0.00428286]#for debugging
+        T_tool_world.translation = avg_end_position[0:3]
+        T_tool_world.rotation = RigidTransform.rotation_from_quaternion(avg_end_position[3:])
         self.follow_traj([T_tool_world], cart_gain = 600, z_cart_gain = 600, rot_cart_gain=250)
         
 
@@ -306,6 +317,10 @@ class Robot():
             np.save("data/"+str(prefix)+"kinect_data.npy", self.kinect_camera_images)
             self.kinect_subscriber.unregister()
 
+    def collision_free_planner(self, start, goal):
+        joint_vals = fa.get_joints()
+        self.pb_world.set_joints(joint_vals) 
+        return self.pb_world.make_traj(goal)
     """
     Linear interpolation of poses, including quaternion
     """
@@ -404,13 +419,11 @@ if __name__ == "__main__":
     n_exps = 3
     robot = Robot()
     #res = robot.keyboard_teleop()
-    robot.modelfree()
-    import ipdb; ipdb.set_trace()
     fa.open_gripper()
     fa.reset_joints()
 
     input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [0,1]:
-        run_insert_exp(robot, i, training=True)
+    for i in [13,14,15,16]:
+        run_insert_exp(robot, i, training=False)
     
