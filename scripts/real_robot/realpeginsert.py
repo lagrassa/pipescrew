@@ -18,7 +18,7 @@ from modelfree.ILPolicy import ILPolicy, process_action_data
 from perception import Kinect2SensorFactory, KinectSensorBridged
 from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
-from env.pegworld import PegWorld
+#from env.pegworld import PegWorld
 from frankapy import FrankaArm
 fa = FrankaArm()
 

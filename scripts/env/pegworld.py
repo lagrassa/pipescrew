@@ -1,8 +1,8 @@
 import pybullet as p
 import numpy as np
-import utils as ut
+import env.pb_utils as ut
 import os
-from  utils import create_cylinder, set_point, set_pose, simulate_for_duration
+from  env.pb_utils import create_cylinder, set_point, set_pose, simulate_for_duration
 
 
 """purely simulated world
@@ -10,7 +10,7 @@ ONLY TO BE USED FOR COLLISION DETECTION
 I am not focusing on making the dynamics of this at all realistic. 
 """
 class PegWorld():
-    def __init__(self, visualize=False, bullet=None, handonly=False):
+    def __init__(self, visualize=False, bullet=None, handonly=False, rectangle_loc =None, circle_loc = None, board_loc = None, obstacle_loc=None):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -20,7 +20,7 @@ class PegWorld():
         self.in_hand = []
         self.setup_robot()
         self.steps_taken = 0
-        self.setup_workspace()
+        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc)
 
 
     """
@@ -108,9 +108,19 @@ class PegWorld():
 
     def detach_shape(self, shape_name):
         self.in_hand = []
+    def set_joints(self, joint_vals):
+        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot), joint_vals)
+        for attachment in self.in_hand:
+            attachment.assign()
+
 
 if __name__ == "__main__":
-    pw = PegWorld(visualize=False, handonly = False)
+    board_loc = ((0,0,0),(1,0,0,0))
+    circle_loc = ((0.3,0.2,0),(1,0,0,0)) #acquire from darknet
+    obstacle_loc = ((0.2,0.1,0),(1,0,0,0)) #TODO acquire from perception
+    rectangle_loc = ((0.3,0.5,0),(1,0,0,0)) 
+    pw = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=False, handonly=False)
+    #pw = PegWorld(visualize=False, handonly = False)
     pw.attach_shape('rectangle', (np.array([0,0,0.05]), np.array([1,0,0,0])))
     traj = pw.make_traj(np.array([0,0.05,0.3]))
     print("trajectory", traj)
