@@ -1,5 +1,6 @@
 from frankapy import FrankaArm
 import rospy
+from pyquaternion import Quaternion
 import cv_bridge
 import time
 #rospy.init_node("planorparam")
@@ -15,10 +16,12 @@ from perception_utils.apriltags import AprilTagDetector
 from perception_utils.realsense import get_first_realsense_sensor
 from modelfree import processimgs, vae
 from modelfree.ILPolicy import ILPolicy, process_action_data
+from test_module.test_behaviour_cloning import test_behaviour_cloning as get_il_policy
 from perception import Kinect2SensorFactory, KinectSensorBridged
 from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
-#from env.pegworld import PegWorld
+from env.pegworld import PegWorld
+from utils.conversion_scripts import rigid_transform_to_pb_pose
 from frankapy import FrankaArm
 fa = FrankaArm()
 
@@ -80,12 +83,12 @@ class Robot():
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
         self.shape_goal_type_to_ids = {Rectangle:1}
         self.setup_perception()
-        self.setup_pbworld()
+        #self.setup_pbworld()
     def setup_pbworld(self):
         board_loc = ((0,0,0),(1,0,0,0))
         circle_loc = ((0.3,0.2,0),(1,0,0,0)) #acquire from darknet
         obstacle_loc = ((0.2,0.1,0),(1,0,0,0)) #TODO acquire from perception
-        rectangle_loc = self.get_shape_location(Rectangle)
+        rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
         self.pb_world = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc)
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
@@ -103,7 +106,7 @@ class Robot():
     """
     executes the model-free policy
     """
-    def modelfree(self, cart_gain =500, z_cart_gain = 500, rot_cart_gain = 100):
+    def modelfree(self, cart_gain =300, z_cart_gain = 300, rot_cart_gain = 80, execute=True):
         for i in range(50): #TODO put in a real termination condition
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
@@ -120,20 +123,30 @@ class Robot():
             ee_data = ee_data.reshape((1,)+ee_data.shape)
             ee_data = process_action_data(ee_data)
             if self.il_policy is None:
-                self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, load_fn = "models/ilpolicy.h5y")
+                #self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, load_fn = "models/ilpolicy.h5y")
+                self.il_policy = get_il_policy()#self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, model_type ="forest", load_fn = "models/rfweights.npy")
             delta_ee_pos = self.il_policy(np.hstack([encoded_camera_data, ee_data]))
-            print(np.round(delta_ee_pos, 2), "next pos")
-            import ipdb; ipdb.set_trace()
+            print(np.round(delta_ee_pos, 3), "next pos")
             new_rot = RigidTransform.rotation_from_quaternion(delta_ee_pos[0,3:])
             delta_ee_rt = RigidTransform(translation=delta_ee_pos[0,0:3], rotation=new_rot)
-            curr_rt = fa.get_pose()
-            #print("Delta pose", next_pos.translation - curr_rt.translation)
-            #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
-            #input("OK to go to pose difference from MF?")
-            delta_ee_rt.from_frame = "franka_tool"
-            delta_ee_rt.to_frame = "franka_tool"
-            fa.goto_pose_delta(delta_ee_rt, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            if not execute:
+                return delta_ee_rt
+            if execute:
+                curr_rt = fa.get_pose()
+                scalar = 5
+                delta_ee_rt.translation *= scalar
+                #print("Delta pose", next_pos.translation - curr_rt.translation)
+                #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
+                #input("OK to go to pose difference from MF?")
+                delta_ee_rt.from_frame = "franka_tool"
+                delta_ee_rt.to_frame = "franka_tool"
 
+                fa.goto_pose_delta(delta_ee_rt, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+                res = input("Complete?")
+                if "y" in res:
+                    return
+
+    
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
@@ -156,7 +169,7 @@ class Robot():
     def grasp_shape(self,T_tag_world, shape_type):
        self.holding_type = shape_type
        x_offset = 0
-       self.grasp_offset = 0.025
+       self.grasp_offset = 0.024
        start = fa.get_pose()
        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, self.grasp_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
@@ -214,8 +227,11 @@ class Robot():
                        -0.00405089, -0.00428286]#for debugging
         T_tool_world.translation = avg_end_position[0:3]
         T_tool_world.rotation = RigidTransform.rotation_from_quaternion(avg_end_position[3:])
-        self.follow_traj([T_tool_world], cart_gain = 600, z_cart_gain = 600, rot_cart_gain=250)
-        
+        T_tool_world.translation[0] -= 0.015
+        T_tool_world.translation[1] -= 0.015
+        self.follow_traj([T_tool_world], cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=300)
+        T_tool_world.translation[-1] -= 0.02
+        self.follow_traj([T_tool_world], cart_gain = 150, z_cart_gain = 700, rot_cart_gain=150)
 
     def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300):
         for pt, i in zip(path, range(len(path))):
@@ -229,11 +245,18 @@ class Robot():
             #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
-            pose_thresh = 0.02
-            if np.linalg.norm(fa.get_pose().translation-new_pos.translation) > pose_thresh:
+            cart_to_sigma = lambda cart: np.exp(-0.00196114*cart-4.04765699)
+            sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
+            rot_sigma = cart_to_sigma(rot_cart_gain)
+            if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
                 model_deviation = True
                 print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
                       str(np.round(fa.get_pose().translation,2)))
+            if (Quaternion.absolute_distance(fa.get_pose().quaternion,new_pos.quaternion) > 1.96*rot_sigma):
+                model_deviation = True
+                print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
+                      str(np.round(fa.get_pose().quaternion,2)))
+
             if force < self.contact_threshold and not expect_contact:
                 print("unexpected contact")
                 model_deviation = True
@@ -327,7 +350,7 @@ class Robot():
     def linear_interp_planner(self, start, goal, n_pts = 2):
         return start.linear_trajectory_to(goal, n_pts)
     def keyboard_teleop(self):
-        print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease ")
+        print("WASD teleop space for up c for down q and e for spin. k to increase delta, j to decrease o is OK ")
         delta = 0.01
         angle_delta = 0.03
         delta_rts = []
@@ -338,22 +361,31 @@ class Robot():
             val = input()
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
-            if val == "a":
+            if val == "quit":
+                break
+            if "a" in val:
                 rt.translation[0] -= delta
-            elif val == "d":
+            if "d" in val:
                 rt.translation[0] += delta
-            elif val == "s":
+            if "s" in val:
                 rt.translation[1] -= delta
-            elif val == "w":
+            if "w" in val:
                 rt.translation[1] += delta
-            elif val == " ":
+            if " " in val:
                 rt.translation[-1] += delta
-            elif val == "c":
+            if "c" in val:
                 rt.translation[-1] -= delta
-            elif val == "q":
+            if val == "o":
+                suggested_rt = self.modelfree(execute=False)
+                res = input("input OK?")
+                if "y" in res:
+                    print("adding to set")
+                else:
+                    continue
+            if "q" in val:
                 rt_rot = RigidTransform.z_axis_rotation(angle_delta)
                 rt.rotation = np.dot(rt.rotation, rt_rot)
-            elif val == "e":
+            if "e" in val:
                 rt_rot = RigidTransform.z_axis_rotation(-angle_delta)
                 rt.rotation = np.dot(rt.rotation, rt_rot)
             elif val == 'k':
@@ -364,11 +396,10 @@ class Robot():
                 delta /= 2
                 angle_delta /=2
                 continue
-            elif val == "quit":
-                break
             imgs.append(img) 
             ee = fa.get_pose()
             ee_rts.append(ee) 
+            rt.translation += np.random.uniform(low = -0.003, high = 0.003, size=rt.translation.shape)
             fa.goto_pose_delta(rt, cartesian_impedances=[500, 500, 500, 100, 100, 100]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             delta_rts.append(rt)
             transes = []
@@ -418,12 +449,18 @@ def run_insert_exp(robot, prefix, training=True):
 if __name__ == "__main__":
     n_exps = 3
     robot = Robot()
-    #res = robot.keyboard_teleop()
+    #robot.keyboard_teleop()
+    #robot.modelfree()
+    #actions, images, ees = robot.keyboard_teleop()
+    #np.save("data/"+str(prefix)+"actions.npy", actions)
+    #np.save("data/"+str(prefix)+"kinect_data.npy", images)
+    #np.save("data/"+str(prefix)+"ee_data.npy", ees)
+  
     fa.open_gripper()
     fa.reset_joints()
 
     input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [13,14,15,16]:
+    for i in [6,7,8,9,10]:
         run_insert_exp(robot, i, training=False)
     
