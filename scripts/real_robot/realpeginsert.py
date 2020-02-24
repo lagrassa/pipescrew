@@ -1,4 +1,6 @@
 from frankapy import FrankaArm
+import GPy
+import os
 import rospy
 from pyquaternion import Quaternion
 import cv_bridge
@@ -24,7 +26,6 @@ from env.pegworld import PegWorld
 from utils.conversion_scripts import rigid_transform_to_pb_pose
 from frankapy import FrankaArm
 fa = FrankaArm()
-import GPy as gpy
 
 class Circle:
     pass
@@ -105,8 +106,8 @@ class Robot():
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         self.contact_threshold = -3.5 # less than is in contact
-        self.bad_model_states = []
-        self.good_model_states = []
+        self.bad_model_states = np.load("data/bad_model_states.npy")
+        self.good_model_states = np.load("data/good_model_states.npy")
         self.autoencoder = None
         self.il_policy=None
         self.bridge = cv_bridge.CvBridge()
@@ -225,12 +226,12 @@ class Robot():
         ee_data = None
         for fn in os.listdir("data/"):
             if "ee_data" in fn:
-                new_ee_data = np.load(fn)[0,:]
+                new_ee_data = np.load("data/"+fn)[0,:]
                 if ee_data is None:
                     ee_data = new_ee_data
                 else:
                     ee_data = np.vstack([ee_data, new_ee_data])
-        self.gp_precond = GPy.models.GPClassification(ee_data,np.ones())
+        self.gp_precond = GPy.models.GPClassification(ee_data,np.ones((len(ee_data),1)))
         self.gp_precond.optimize() #just once
         #sample point from modelfree precond
         return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
@@ -238,9 +239,9 @@ class Robot():
     def goto_modelfree_precond(self):
         sample = self.sample_modelfree_precond_pt() 
         rotation = RigidTransform.rotation_from_quaternion(sample[3:])
-        sample = RigidTransform(sample[0:3], rotation = rotation)
+        sample = RigidTransform(translation=sample[0:3], rotation = rotation, from_frame="franka_tool", to_frame="world")
         path = self.linear_interp_planner(fa.get_pose(), sample)
-        self.follow_traj(path)
+        self.follow_traj(path, monitor_execution=True)
 
 
 
@@ -294,29 +295,30 @@ class Robot():
         return res
 
     def in_region_with_modelfailure(self,pt, retrain=True):
-        if self.gp is None:
-            self.gp = GPy.models.GPClassification(X,Y)
-            for i in range(6):
-                self.gp.optimize()
         if retrain:
-            bad = np.load("data/bad_model_states.npy")
-            good = np.load("data/good_model_states.npy")
+            bad = np.load("data/bad_model_states.npy", allow_pickle=True)
+            good = np.load("data/good_model_states.npy", allow_pickle=True)
             if len(bad) == 0 and len(good) == 0:
                 return False
             X = np.vstack([good, bad])
             Y = np.vstack([np.ones((len(good),1)), np.zeros((len(bad),1))])
-            self.gp.fit(X,Y)
-        import ipdb; ipdb.set_trace()
-        return bool(np.round(self.gp.predict(pt.reshape(-1,1))))
+            if self.gp is None:
+                self.gp = GPy.models.GPClassification(X,Y)
+                for i in range(6):
+                    self.gp.optimize()
+        pred = self.gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
+        return not bool(np.round(pred.item()))
 
-    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300):
-        for pt in path:
-            if self.in_region_with_modelfailure(pt):
-                return "expected_model_failure"
+    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300, monitor_execution=True):
+        if monitor_execution:
+            for pt in path:
+                if self.in_region_with_modelfailure(pt):
+                    print("expected model failure")
+                    return "expected_model_failure"
         for pt, i in zip(path, range(len(path))):
             new_pos = pt
             expect_contact = False
-            if new_pos.translation[2] < 0.01:
+            if new_pos.translation[2]-self.grasp_offset < 0.005:
                 expect_contact = True
 
             fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
@@ -324,34 +326,36 @@ class Robot():
             #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
-            cart_to_sigma = lambda cart: np.exp(-0.00196114*cart-4.04765699)
+            cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
             sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
             rot_sigma = cart_to_sigma(rot_cart_gain)
-            if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
-                model_deviation = True
-                print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
-                      str(np.round(fa.get_pose().translation,2)))
-            if (Quaternion.absolute_distance(fa.get_pose().quaternion,new_pos.quaternion) > 1.96*rot_sigma):
-                model_deviation = True
-                print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
-                      str(np.round(fa.get_pose().quaternion,2)))
+            if monitor_execution:
+                if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
+                    model_deviation = True
+                    print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
+                        str(np.round(fa.get_pose().translation,2)))
+                if (Quaternion.absolute_distance(Quaternion(fa.get_pose().quaternion),Quaternion(new_pos.quaternion)) > 1.96*rot_sigma):
+                    model_deviation = True
+                    print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
+                        str(np.round(fa.get_pose().quaternion,2)))
 
-            if force < self.contact_threshold and not expect_contact:
-                print("unexpected contact")
-                model_deviation = True
-            elif force > self.contact_threshold and expect_contact:
-                print("expected contact")
-                model_deviation = True
-            if model_deviation:
-                self.bad_model_states.append(path[i-1])
-            else:
-                self.good_model_states.append(path[i-1])
-            np.save("data/bad_model_states.npy", self.bad_model_states)
-            np.save("data/good_model_states.npy", self.good_model_states)
-            if model_deviation:
-                print("Ending MB policy due to model deviation")
-                return("model_failure")
-        return "expected_good"
+                if force < self.contact_threshold and not expect_contact:
+                    print("unexpected contact")
+                    model_deviation = True
+                elif force > self.contact_threshold and expect_contact:
+                    print("expected contact")
+                    model_deviation = True
+                if model_deviation:
+                    self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([path[i-1].translation,path[i-1].quaternion]))])
+                else:
+                    self.good_model_states = np.vstack([self.bad_model_states, (np.hstack([path[i-1].translation,path[i-1].quaternion]))])
+                np.save("data/bad_model_states.npy", self.bad_model_states)
+                np.save("data/good_model_states.npy", self.good_model_states)
+                if model_deviation:
+                    print("Ending MB policy due to model deviation")
+                    return("model_failure")
+        if monitor_execution:
+            return "expected_good"
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
