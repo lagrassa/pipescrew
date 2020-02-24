@@ -24,9 +24,40 @@ from env.pegworld import PegWorld
 from utils.conversion_scripts import rigid_transform_to_pb_pose
 from frankapy import FrankaArm
 fa = FrankaArm()
+import GPy as gpy
 
 class Circle:
     pass
+class Obstacle:
+    def __init__(self):
+        pass
+    @staticmethod
+    def symmetries():
+        return [-np.pi,-np.pi/2, 0, np.pi/2, np.pi]
+    @staticmethod
+    def tforms_to_pose(ids, tforms,goal=False):
+        rectangles_ids = [8,9,10,11]
+        relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
+        relevant_tforms = []
+        for id_num in relevant_ids:
+            tform_idx = ids.index(id_num)
+            relevant_tforms.append(tforms[tform_idx])
+        
+        avg_rotation = relevant_tforms[0]
+        for i in range(1, len(relevant_tforms)):
+            avg_rotation = avg_rotation.interpolate_with(relevant_tforms[i], 0.5)
+
+        if len(relevant_ids) == 4:
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
+        elif 8 in relevant_ids and 10 in relevant_ids:
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
+        elif 9 in relevant_ids and 11 in relevant_ids:
+            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
+        else:
+            print(relevant_ids)
+            print("Not enough detections to make accurate pose estimate")
+
+        return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
 
 class Square:
     pass
@@ -82,6 +113,7 @@ class Robot():
         self.shape_to_goal_loc = {}
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
         self.shape_goal_type_to_ids = {Rectangle:1}
+        self.gp = None
         self.setup_perception()
         #self.setup_pbworld()
     def setup_pbworld(self):
@@ -161,7 +193,6 @@ class Robot():
         if straighten:
             T_tag_world  = straighten_transform(T_tag_world)
         print("detected pose", np.round(T_tag_world.translation,2))
-
         return T_tag_world
     """
     Goes to shape center and then grasps it 
@@ -189,6 +220,29 @@ class Robot():
        path = self.linear_interp_planner(start, T_tool_world)
        self.follow_traj(path)
        fa.close_gripper()
+
+    def sample_modelfree_precond_pt(self):
+        ee_data = None
+        for fn in os.listdir("data/"):
+            if "ee_data" in fn:
+                new_ee_data = np.load(fn)[0,:]
+                if ee_data is None:
+                    ee_data = new_ee_data
+                else:
+                    ee_data = np.vstack([ee_data, new_ee_data])
+        self.gp_precond = GPy.models.GPClassification(ee_data,np.ones())
+        self.gp_precond.optimize() #just once
+        #sample point from modelfree precond
+        return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
+
+    def goto_modelfree_precond(self):
+        sample = self.sample_modelfree_precond_pt() 
+        rotation = RigidTransform.rotation_from_quaternion(sample[3:])
+        sample = RigidTransform(sample[0:3], rotation = rotation)
+        path = self.linear_interp_planner(fa.get_pose(), sample)
+        self.follow_traj(path)
+
+
 
     """
     assumes shape is already held 
@@ -221,19 +275,44 @@ class Robot():
         above_T_tool_world.translation[-1] = fa.get_pose().translation[-1] #keep it at the same z
         #now over where it needs to be and at the right place
         path = self.linear_interp_planner(fa.get_pose(), above_T_tool_world)
-        self.follow_traj(path, cart_gain = 2200, z_cart_gain = 2200, rot_cart_gain=250)
+        
+        res = self.follow_traj(path, cart_gain = 2200, z_cart_gain = 2200, rot_cart_gain=250)
+        if res != "expected_good":
+            return res
         T_tool_world.translation[-1] = self.grasp_offset
-        avg_end_position = [ 0.53684655,  0.10351364,  0.02622978, -0.00137794,  0.9999593 ,
+        modelfree_precond_mean = [ 0.53684655,  0.10351364,  0.02622978, -0.00137794,  0.9999593 ,
                        -0.00405089, -0.00428286]#for debugging
-        T_tool_world.translation = avg_end_position[0:3]
-        T_tool_world.rotation = RigidTransform.rotation_from_quaternion(avg_end_position[3:])
+        T_tool_world.translation = modelfree_precond_mean[0:3]
+        T_tool_world.rotation = RigidTransform.rotation_from_quaternion(modelfree_precond_mean[3:])
         T_tool_world.translation[0] -= 0.015
         T_tool_world.translation[1] -= 0.015
-        self.follow_traj([T_tool_world], cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=300)
+        res = self.follow_traj([T_tool_world], cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=300)
+        if res != "expected_good":
+            return res
         T_tool_world.translation[-1] -= 0.02
-        self.follow_traj([T_tool_world], cart_gain = 150, z_cart_gain = 700, rot_cart_gain=150)
+        res = self.follow_traj([T_tool_world], cart_gain = 150, z_cart_gain = 700, rot_cart_gain=150)
+        return res
+
+    def in_region_with_modelfailure(self,pt, retrain=True):
+        if self.gp is None:
+            self.gp = GPy.models.GPClassification(X,Y)
+            for i in range(6):
+                self.gp.optimize()
+        if retrain:
+            bad = np.load("data/bad_model_states.npy")
+            good = np.load("data/good_model_states.npy")
+            if len(bad) == 0 and len(good) == 0:
+                return False
+            X = np.vstack([good, bad])
+            Y = np.vstack([np.ones((len(good),1)), np.zeros((len(bad),1))])
+            self.gp.fit(X,Y)
+        import ipdb; ipdb.set_trace()
+        return bool(np.round(self.gp.predict(pt.reshape(-1,1))))
 
     def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300):
+        for pt in path:
+            if self.in_region_with_modelfailure(pt):
+                return "expected_model_failure"
         for pt, i in zip(path, range(len(path))):
             new_pos = pt
             expect_contact = False
@@ -271,7 +350,8 @@ class Robot():
             np.save("data/good_model_states.npy", self.good_model_states)
             if model_deviation:
                 print("Ending MB policy due to model deviation")
-                return
+                return("model_failure")
+        return "expected_good"
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
@@ -435,15 +515,20 @@ def run_insert_exp(robot, prefix, training=True):
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
     robot.grasp_shape(shape_center, Rectangle)
-    robot.insert_shape()
-    if training: 
-        #robot.kinesthetic_teaching(prefix)
-        actions, images, ees = robot.keyboard_teleop()
-        np.save("data/"+str(prefix)+"actions.npy", actions)
-        np.save("data/"+str(prefix)+"kinect_data.npy", images)
-        np.save("data/"+str(prefix)+"ee_data.npy", ees)
+    result = robot.insert_shape()
+    if result == "model_failure" or result == "expected_model_failure":
+        if training: 
+            #robot.kinesthetic_teaching(prefix)
+            actions, images, ees = robot.keyboard_teleop()
+            np.save("data/"+str(prefix)+"actions.npy", actions)
+            np.save("data/"+str(prefix)+"kinect_data.npy", images)
+            np.save("data/"+str(prefix)+"ee_data.npy", ees)
+        else:
+            robot.goto_modelfree_precond()
+            robot.modelfree()
+        
     else:
-        robot.modelfree()
+        print("Success on first try! No learning needed")
 
 
 if __name__ == "__main__":
