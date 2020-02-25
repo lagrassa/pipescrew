@@ -1,5 +1,8 @@
 import pybullet as p
 import numpy as np
+from pyquaternion import Quaternion
+from transformations import quaternion_about_axis
+from real_robot.shapes import *
 import env.pb_utils as ut
 import os
 from  env.pb_utils import create_cylinder, set_point, set_pose, simulate_for_duration
@@ -10,7 +13,8 @@ ONLY TO BE USED FOR COLLISION DETECTION
 I am not focusing on making the dynamics of this at all realistic. 
 """
 class PegWorld():
-    def __init__(self, visualize=False, bullet=None, handonly=False, rectangle_loc =None, circle_loc = None, board_loc = None, obstacle_loc=None):
+    def __init__(self, visualize=False, bullet=None, handonly=False, rectangle_loc = [[0.562, -0.121, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
+            obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, -0.015],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  ((0.55,0.08, 0), (1,0,0,0))):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -20,7 +24,7 @@ class PegWorld():
         self.in_hand = []
         self.setup_robot()
         self.steps_taken = 0
-        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc)
+        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal)
 
 
     """
@@ -34,7 +38,7 @@ class PegWorld():
             start_joints = (0.09186411075857098, 0.02008522792588543, 0.03645461729775788, -1.9220854528910314, 0.213232566443952983, 1.647271913704007, 0.0, 0.0, 0.0)
             start_joints = [ 2.78892560e-04, -7.85089406e-01,  4.81729135e-05, -2.35613802e+00,
                             4.95981896e-04,  1.57082514e+00,  7.85833531e-01, 0, 0]
-            self.grasp_joint = 9
+            self.grasp_joint = 10
             p.changeDynamics(self.robot, -1, mass=0)
             ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot), start_joints)
         else:
@@ -48,10 +52,9 @@ class PegWorld():
     """
     table with a hollow and solid cylinder on it
     """
-    def setup_workspace(self, rectangle_loc = ([0.562, 0.151, 0.016], [-0.029, -0.   ,  0.   ,  1.   ]),
-            circle_loc = ([0.425, 0.101, 0.01 ],[-0.03, -0.  ,  0.  ,  1.  ]),
-            obstacle_loc = ([ 0.53172045, -0.03062703,  0.07507126], [-0.028, -0.   ,  0.   ,  1.   ]), board_loc = ((0.479, 0.0453, -0.015),[0.707, 0.707, 0.   , 0.   ])):
-        import ipdb; ipdb.set_trace()
+    def setup_workspace(self, rectangle_loc = [[0.562, 0.151, 0.016], [1, 0.   ,  0.   ,  0   ]],
+            circle_loc = [[0.425, 0.101, 0.01 ],[1, 0.  ,  0.  ,  0  ]],
+            obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.015],[0.707, 0.707, 0.   , 0.   ]], hole_goal = [[0.55, 0.08, 0.0],[1,0,0,0]]):
         #RigidTransform(rotation=np.array([[-5.78152806e-02, -9.98327119e-01,  4.84639353e-07],
         #       [-9.98327425e-01,  5.78157598e-02,  3.97392158e-08],
         #              [ 4.07518811e-07, -6.59092487e-08, -9.99999635e-01]]), translation=np.array([ 0.53810962,  0.08998347, -0.00768057]), from_frame='peg_center', to_frame='world')
@@ -62,6 +65,7 @@ class PegWorld():
         length = 0.3
         height = 0.02
         block_height = 0.01
+        self.block_height = block_height
         self.board = ut.create_box(width, length, height, color = (1,0.7,0,1)) 
         ut.set_pose(self.board, board_loc)
         #make circle
@@ -70,25 +74,53 @@ class PegWorld():
         #make rectangle
         self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.5,0,0.1,1))
         self.obstacle = ut.create_box(0.08, 0.04, 0.08, color = (0.5,0.5,0.5,1))
+        self.hole = ut.create_box(0.092, 0.069, 0.005, color = (0.1,0,0,1))
         rectangle_loc[0][-1] -= 0.5*block_height
         circle_loc[0][-1] -= 0.5*block_height
         obstacle_loc[0][-1] -= 0.5*0.08
         ut.set_pose(self.rectangle, rectangle_loc)
         ut.set_pose(self.circle, circle_loc)
         ut.set_pose(self.obstacle, obstacle_loc)
+        ut.set_pose(self.hole, hole_goal)
         self.shape_name_to_shape = {}
-        self.shape_name_to_shape['circle'] = self.circle
-        self.shape_name_to_shape['rectangle'] = self.rectangle
+        self.shape_name_to_shape[Circle] = self.circle
+        self.shape_name_to_shape[Rectangle] = self.rectangle
+        self.shape_name_to_shape[Obstacle] = self.obstacle
+        input("workspace okay?")
+
+    def get_closest_ee_goal(self, shape_goal, shape_class=Rectangle, grasp_offset = 0.055):
+        #symmetry that minimizes the distance between shape_goal and the current ee pose. 
+        curr_quat = Quaternion(p.getLinkState(self.robot, self.grasp_joint)[1])
+        goal_quat = Quaternion(shape_goal[1])
+        syms = shape_class.symmetries()
+        transformation_lib_quats = [quaternion_about_axis(sym, (0,0,1))for sym in syms]
+        sym_quats = [Quaternion(np.hstack([lib_quat[-1],lib_quat[0:3]])) for lib_quat in transformation_lib_quats]
+        best_sym_idx = np.argmin([Quaternion.absolute_distance(curr_quat,sym_quat.rotate(goal_quat)) for sym_quat in sym_quats])
+        best_sym = shape_class.symmetries()[best_sym_idx]
+        best_quat = Quaternion(quaternion_about_axis(best_sym, (0,0,1))).rotate(goal_quat) 
+        assert(Quaternion.absolute_distance(curr_quat, best_quat) < 0.01)
+        
+        self.grasp_offset = grasp_offset+self.block_height*0.5
+        grasp_translation =np.array([0,0,self.grasp_offset])
+        ee_trans = grasp_translation+shape_goal[0]
+        grasp_rot = np.dot(curr_quat.rotation_matrix, np.linalg.inv(best_quat.rotation_matrix))
+        grasp_quat = Quaternion(matrix=grasp_rot).elements
+        grasp = (grasp_translation, grasp_quat)
+        ee_pose = (ee_trans, best_quat.elements)
+        return ee_pose, grasp
+
+        
+
 
     """
     Trajectory from current pose to goal considering attachments
     Avoids obstacles. This is our planner. At the moment it does not consider any transition model uncertainty. Will update after experimental results
     """
-    def make_traj(self, goal):
+    def make_traj(self, goal_pose, shape_class=Rectangle):
+        state = p.saveState()
         #quat =  p.getLinkState(self.robot, self.grasp_joint)[1]
         quat = [1,0,0,0]
         #all of this only really makes sense with a full robot
-        goal_pose = (goal+self.grasp[0], quat)
         joints_to_plan_for = ut.get_movable_joints(self.robot)[:-2] #all but the fingers
 
         rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
@@ -101,12 +133,14 @@ class PegWorld():
 
         end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
         end_conf = end_conf[:len(joints_to_plan_for)]
-        for attachment in self.in_hand:
-            attachment.assign()
-        traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.obstacle, self.rectangle], attachments=self.in_hand,
+        p.restoreState(state)
+        #for attachment in self.in_hand:
+        #    attachment.assign()
+        traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.obstacle, self.circle], attachments=self.in_hand,
                       self_collisions=True, disabled_collisions=set(self.in_hand),
                       weights=None, resolutions=None)
         
+        p.restoreState(state)
         return traj
     def attach_shape(self, shape_name, grasp_pose):
         self.grasp = grasp_pose
@@ -119,19 +153,46 @@ class PegWorld():
     def detach_shape(self, shape_name):
         self.in_hand = []
     def set_joints(self, joint_vals):
-        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot), joint_vals)
+        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
         for attachment in self.in_hand:
             attachment.assign()
+    def visualize_traj(self, path):
+        for pt in path:
+            self.set_joints(pt)
+            #input("ready for next set?")
+    def visualize_points(self, pt_set):
+        for pt in pt_set:
+            pb_pt = ut.create_sphere(0.005)
+            ut.set_point(pb_pt, pt)
+    """
+    Collision-free trajectory  to place object in hole
+    """
+    def grasp_object(self, shape_class=Rectangle, visualize=False):
+        shape_goal = p.getBasePositionAndOrientation(pw.rectangle)
+        ee_goal, grasp = pw.get_closest_ee_goal(shape_goal, shape_class=Rectangle)
+        #grasp = grasp_from_ee_and_obj(ee_goal, shape_goal)
+        grasp_traj = pw.make_traj(ee_goal)
+        if visualize:
+            pw.visualize_traj(grasp_traj)
+        pw.attach_shape(Rectangle, grasp)
+        return grasp_traj
+    """
+    Collision-free trajectory  to place object in hole
+    """
+    def place_object(self, visualize=False, shape_class=Rectangle, hole_goal= [[0.55, 0.08, 0.0],[1,0,0,0]]):
+        ee_goal, grasp = pw.get_closest_ee_goal(hole_goal, shape_class=shape_class, grasp_offset = 0.095)
+        traj = pw.make_traj(ee_goal)
+        if visualize:
+            pw.visualize_traj(traj)
+        return traj
+
 
 
 if __name__ == "__main__":
-    board_loc = ((0,0,0),(1,0,0,0))
-    circle_loc = ((0.3,0.2,0),(1,0,0,0)) #acquire from darknet
-    obstacle_loc = ((0.2,0.1,0),(1,0,0,0)) #TODO acquire from perception
-    rectangle_loc = ((0.3,0.5,0),(1,0,0,0)) 
-    pw = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=True, handonly=False)
+    #pw = PegWorld( visualize=False, handonly=False)
+    pw = PegWorld(visualize=True, handonly = False)
+    pw.grasp_object(shape_class=Rectangle, visualize=True)
+    pw.visualize_points(np.load("../real_robot/data/bad_model_states.npy")[:,0:3])
+    pw.place_object(shape_class=Rectangle, visualize=True)
     import ipdb; ipdb.set_trace()
-    #pw = PegWorld(visualize=False, handonly = False)
-    pw.attach_shape('rectangle', (np.array([0,0,0.05]), np.array([1,0,0,0])))
-    traj = pw.make_traj(np.array([0,0.05,0.3]))
     print("trajectory", traj)
