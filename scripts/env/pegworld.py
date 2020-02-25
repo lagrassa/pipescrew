@@ -88,18 +88,20 @@ class PegWorld():
         self.shape_name_to_shape[Obstacle] = self.obstacle
         input("workspace okay?")
 
-    def get_closest_ee_goal(self, shape_goal, shape_class=Rectangle, grasp_offset = 0.055):
+    def get_closest_ee_goals(self, shape_goal, shape_class=Rectangle, grasp_offset = 0.055):
         #symmetry that minimizes the distance between shape_goal and the current ee pose. 
         curr_quat = Quaternion(p.getLinkState(self.robot, self.grasp_joint)[1])
         goal_quat = Quaternion(shape_goal[1])
-        syms = shape_class.symmetries()
+        syms = shape_class.grasp_symmetries()
         transformation_lib_quats = [quaternion_about_axis(sym, (0,0,1))for sym in syms]
         sym_quats = [Quaternion(np.hstack([lib_quat[-1],lib_quat[0:3]])) for lib_quat in transformation_lib_quats]
-        best_sym_idx = np.argmin([Quaternion.absolute_distance(curr_quat,sym_quat.rotate(goal_quat)) for sym_quat in sym_quats])
+        best_sym_idx = np.argmin([Quaternion.absolute_distance(curr_quat,Quaternion(matrix=np.dot(sym_quat.rotation_matrix,goal_quat.rotation_matrix))) for sym_quat in sym_quats
+])
         best_sym = shape_class.symmetries()[best_sym_idx]
-        best_quat = Quaternion(quaternion_about_axis(best_sym, (0,0,1))).rotate(goal_quat) 
-        assert(Quaternion.absolute_distance(curr_quat, best_quat) < 0.01)
-        
+        #best_quat = Quaternion(quaternion_about_axis(best_sym, (0,0,1))).rotate(goal_quat) 
+        #assert(Quaternion.absolute_distance(curr_quat, best_quat) < 0.01)
+        best_quat = curr_quat #hack until I can get the angle stuff working
+         
         self.grasp_offset = grasp_offset+self.block_height*0.5
         grasp_translation =np.array([0,0,self.grasp_offset])
         ee_trans = grasp_translation+shape_goal[0]
@@ -108,6 +110,7 @@ class PegWorld():
         grasp = (grasp_translation, grasp_quat)
         ee_pose = (ee_trans, best_quat.elements)
         return ee_pose, grasp
+
 
         
 
@@ -130,8 +133,12 @@ class PegWorld():
         ranges = 10*np.ones(len(joints_to_plan_for))
         null_space = [lower, upper, ranges, [rest]]
         null_space = None
-
+       
         end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
+        if end_conf is None:
+            print("No IK solution found")
+            p.restoreState(state) 
+            return None
         end_conf = end_conf[:len(joints_to_plan_for)]
         p.restoreState(state)
         #for attachment in self.in_hand:
@@ -159,7 +166,7 @@ class PegWorld():
     def visualize_traj(self, path):
         for pt in path:
             self.set_joints(pt)
-            #input("ready for next set?")
+            input("ready for next set?")
     def visualize_points(self, pt_set):
         for pt in pt_set:
             pb_pt = ut.create_sphere(0.005)
@@ -169,18 +176,39 @@ class PegWorld():
     """
     def grasp_object(self, shape_class=Rectangle, visualize=False):
         shape_goal = p.getBasePositionAndOrientation(pw.rectangle)
-        ee_goal, grasp = pw.get_closest_ee_goal(shape_goal, shape_class=Rectangle)
+        ee_goals = []
+        grasps = []
+        state = p.saveState()
+        sample_joint = 6
+        original = ut.get_joint_position(self.robot, sample_joint)
+        grasp_symmetries =  shape_class.grasp_symmetries()
+        for sym in grasp_symmetries:
+            if original+sym < 3 and original+sym > -3:
+                ut.set_joint_position(self.robot, sample_joint, original+sym)
+                curr_pos  = ut.get_joint_position(self.robot, sample_joint)
+                ee_goal, grasp = pw.get_closest_ee_goals(shape_goal, shape_class=Rectangle)
+                ee_goals.append(ee_goal)
+                grasps.append(grasp)
+        p.restoreState(state)
+
         #grasp = grasp_from_ee_and_obj(ee_goal, shape_goal)
-        grasp_traj = pw.make_traj(ee_goal)
+        working_grasp = None
+        working_traj = None
+        for ee_goal, grasp in zip(ee_goals, grasps):
+            grasp_traj = pw.make_traj(ee_goal)
+            if grasp_traj is not None:
+                working_grasp = grasp 
+                working_traj = grasp_traj
+                import ipdb; ipdb.set_trace()
         if visualize:
-            pw.visualize_traj(grasp_traj)
-        pw.attach_shape(Rectangle, grasp)
+            pw.visualize_traj(working_traj)
+        pw.attach_shape(Rectangle, working_grasp)
         return grasp_traj
     """
     Collision-free trajectory  to place object in hole
     """
     def place_object(self, visualize=False, shape_class=Rectangle, hole_goal= [[0.55, 0.08, 0.0],[1,0,0,0]]):
-        ee_goal, grasp = pw.get_closest_ee_goal(hole_goal, shape_class=shape_class, grasp_offset = 0.095)
+        ee_goal, grasp = pw.get_closest_ee_goals(hole_goal, shape_class=shape_class, grasp_offset = 0.095)
         traj = pw.make_traj(ee_goal)
         if visualize:
             pw.visualize_traj(traj)
@@ -192,7 +220,5 @@ if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
     pw = PegWorld(visualize=True, handonly = False)
     pw.grasp_object(shape_class=Rectangle, visualize=True)
-    pw.visualize_points(np.load("../real_robot/data/bad_model_states.npy")[:,0:3])
+    #pw.visualize_points(np.load("../real_robot/data/bad_model_states.npy", allow_pickle=True)[:,0:3])
     pw.place_object(shape_class=Rectangle, visualize=True)
-    import ipdb; ipdb.set_trace()
-    print("trajectory", traj)
