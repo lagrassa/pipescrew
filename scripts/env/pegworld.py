@@ -15,7 +15,7 @@ I am not focusing on making the dynamics of this at all realistic.
 """
 class PegWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False, rectangle_loc = [[0.562, -0.121, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  ((0.55,0.08, 0), (1,0,0,0))):
+            obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -64,10 +64,12 @@ class PegWorld():
         #make board
         width = 0.4
         length = 0.3
+        fake_board_thickness = 0.05
         height = 0.01
         block_height = 0.01
         self.block_height = block_height
-        self.board = ut.create_box(width, length, height, color = (1,0.7,0,1)) 
+        self.board = ut.create_box(width, length, height+fake_board_thickness, color = (1,0.7,0,1)) 
+        board_loc[0][-1] -= 0.5*fake_board_thickness
         ut.set_pose(self.board, board_loc)
         #make circle
         radius = 0.078/2
@@ -75,11 +77,13 @@ class PegWorld():
         #make rectangle
         self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.5,0,0.1,1))
         self.obstacle = ut.create_box(0.08, 0.04, 0.08, color = (0.5,0.5,0.5,1))
-        self.hole = ut.create_box(0.092, 0.069, 0.005, color = (0.1,0,0,1))
+        self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
         board_z = 0.013+0.005
         rectangle_loc[0][-1] = board_z+0.5*block_height
         circle_loc[0][-1] = board_z+0.5*block_height
         obstacle_loc[0][-1] = board_z+0.5*0.08
+        hole_goal[0][-1] = board_z+0.5*0.001
+        self.hole_goal = hole_goal
         ut.set_pose(self.rectangle, rectangle_loc)
         ut.set_pose(self.circle, circle_loc)
         ut.set_pose(self.obstacle, obstacle_loc)
@@ -147,7 +151,7 @@ class PegWorld():
         #    attachment.assign()
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=[self.board, self.obstacle, self.circle], attachments=self.in_hand,
                       self_collisions=True, disabled_collisions=set(self.in_hand),
-                      weights=None, resolutions=None)
+                      weights=None, resolutions=None, smooth=100, restarts=5, iterations=100)
         
         p.restoreState(state)
         return traj
@@ -186,21 +190,28 @@ class PegWorld():
     """
     def grasp_object(self, shape_class=Rectangle, visualize=False):
         shape_goal = p.getBasePositionAndOrientation(pw.rectangle)
+        traj, grasp = self.sample_trajs(shape_goal, shape_class=shape_class)
+        if visualize:
+            pw.visualize_traj(traj)
+        pw.attach_shape(Rectangle, grasp)
+        return traj
+
+    def sample_trajs(self, goal, shape_class=Rectangle):
         ee_goals = []
         grasps = []
         state = p.saveState()
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
         grasp_symmetries =  shape_class.grasp_symmetries()
+        self.grasp_offset = 0.015+self.franka_tool_to_pb_link
         for sym in grasp_symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
                 curr_pos  = ut.get_joint_position(self.robot, sample_joint)
-                ee_goal, grasp = pw.get_closest_ee_goals(shape_goal, shape_class=Rectangle, grasp_offset = 0.025+self.franka_tool_to_pb_link)
+                ee_goal, grasp = pw.get_closest_ee_goals(goal, shape_class=Rectangle, grasp_offset = self.grasp_offset)
                 ee_goals.append(ee_goal)
                 grasps.append(grasp)
         p.restoreState(state)
-
         #grasp = grasp_from_ee_and_obj(ee_goal, shape_goal)
         working_grasp = None
         working_traj = None
@@ -209,16 +220,15 @@ class PegWorld():
             if grasp_traj is not None:
                 working_grasp = grasp 
                 working_traj = grasp_traj
-        if visualize:
-            pw.visualize_traj(working_traj)
-        pw.attach_shape(Rectangle, working_grasp)
-        return grasp_traj
+        assert(working_traj is not None)
+        return working_traj, working_grasp
     """
     Collision-free trajectory  to place object in hole
     """
     def place_object(self, visualize=False, shape_class=Rectangle, hole_goal= [[0.55, 0.08, 0.0],[1,0,0,0]]):
-        ee_goal, grasp = pw.get_closest_ee_goals(hole_goal, shape_class=shape_class, grasp_offset = 0.025 + pw.franka_tool_to_pb_link)
-        traj = pw.make_traj(ee_goal)
+        hole_goal = self.hole_goal.copy()
+        hole_goal[0][-1] = 0.03
+        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle)
         if visualize:
             pw.visualize_traj(traj)
         return traj
