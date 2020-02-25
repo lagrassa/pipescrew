@@ -2430,16 +2430,15 @@ def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disa
         for link1, link2 in check_link_pairs:
             # Self-collisions should not have the max_distance parameter
             if pairwise_link_collision(body, link1, body, link2): #, **kwargs):
-                #hack
                 if link1 == 6 and link2 == 8 or link1 == 8 and link2 == 6:
                     return False #panda is improperly specified: they do indeed have a contact point
-                #print(get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
+                print("Pairwise link collision", get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
                 set_joint_positions(body, joints, old_q)
                 [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
                 return True
         for body1, body2 in check_body_pairs:
             if pairwise_collision(body1, body2, **kwargs):
-                #print(get_body_name(body1), get_body_name(body2))
+                #print("Pairwise body collision", get_body_name(body1), get_body_name(body2))
                 set_joint_positions(body, joints, old_q)
                 [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
                 return True
@@ -3033,7 +3032,7 @@ def inverse_kinematics_helper(robot, link, target_pose, movable_joints=None, nul
         return None
     return kinematic_conf
 
-def is_pose_close(pose, target_pose, pos_tolerance=1e-3, ori_tolerance=1e-3*np.pi):
+def is_pose_close(pose, target_pose, pos_tolerance=5e-3, ori_tolerance=5e-3*np.pi):
     (point, quat) = pose
     (target_point, target_quat) = target_pose
     if (target_point is not None) and not np.allclose(point, target_point, atol=pos_tolerance, rtol=0):

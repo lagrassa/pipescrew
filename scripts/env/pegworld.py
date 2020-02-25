@@ -154,9 +154,16 @@ class PegWorld():
         attachment = ut.Attachment(self.robot, self.grasp_joint, grasp_pose, self.shape_name_to_shape[shape_name])
         new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
         #ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
-        import ipdb; ipdb.set_trace()
         attachment.assign()
         self.in_hand = [attachment]
+
+    def fk_rigidtransform(self, joint_vals):
+        state = p.saveState()
+        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
+        link_pos = ut.get_link_pose(self.robot, self.grasp_joint)
+        rt = RigidTransform(translation=link_pos[0], rotation=Quaternion(link_pos[1]).rotation_matrix)
+        p.restoreState(state)
+        return rt
 
     def detach_shape(self, shape_name):
         self.in_hand = []
@@ -202,7 +209,6 @@ class PegWorld():
                 working_traj = grasp_traj
         if visualize:
             pw.visualize_traj(working_traj)
-        import ipdb; ipdb.set_trace()
         pw.attach_shape(Rectangle, working_grasp)
         return grasp_traj
     """

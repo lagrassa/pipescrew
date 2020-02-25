@@ -195,6 +195,22 @@ class Robot():
             T_tag_world  = straighten_transform(T_tag_world)
         print("detected pose", np.round(T_tag_world.translation,2))
         return T_tag_world
+
+    def model_based_grasp_shape(self, T_tag_world, shape_type):
+       self.holding_type = shape_type
+       x_offset = 0
+       self.grasp_offset = 0.024
+       start = fa.get_pose()
+       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, self.grasp_offset], from_frame="peg_center",
+                                   to_frame="franka_tool")
+       T_tool_world = T_tag_world * T_tag_tool.inverse()
+       fa.open_gripper()
+       path = self.pb_world.grasp_object()
+       res =  self.follow_traj(path)
+       fa.close_gripper()
+       return res
+
+        
     """
     Goes to shape center and then grasps it 
     """
@@ -244,7 +260,15 @@ class Robot():
         self.follow_traj(path, monitor_execution=True)
 
 
-
+    def model_based_insert_shape(self):
+        T_tag_world = self.get_shape_goal_location( self.holding_type)
+        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.0],
+                                    from_frame=T_tag_world.from_frame,
+                                    to_frame="franka_tool")
+        T_tool_world = T_tag_world * T_tag_tool.inverse()
+        hole_goal = (T_tool_world.translation, T_tool_world.quaternion)
+        place_traj = self.pb_world.place_object(hole_goal, shape_class=Rectangle)
+        return self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250)
     """
     assumes shape is already held 
     """
@@ -309,19 +333,26 @@ class Robot():
         pred = self.gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
         return not bool(np.round(pred.item()))
 
-    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300, monitor_execution=True):
+    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart"):
         if monitor_execution:
             for pt in path:
-                if self.in_region_with_modelfailure(pt):
+                if traj_type != "cart":
+                    cart_pt = self.pb_world.fk_rigidtransform(pt)
+                else:
+                    cart_pt = pt
+                if self.in_region_with_modelfailure(cart_pt):
                     print("expected model failure")
                     return "expected_model_failure"
         for pt, i in zip(path, range(len(path))):
-            new_pos = pt
+            if traj_type == "cart":
+                new_pos = pt
+            else:
+                new_pos = self.pb_world.fk_rigidtransform(pt)
             expect_contact = False
             if new_pos.translation[2]-self.grasp_offset < 0.005:
                 expect_contact = True
-
-            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            if traj_type == "cart"
+                fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #consider breaking this one up to make it smoother
             force = self.feelforce()
