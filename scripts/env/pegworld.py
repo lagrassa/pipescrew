@@ -106,7 +106,7 @@ class PegWorld():
         grasp_translation =np.array([0,0,self.grasp_offset])
         ee_trans = grasp_translation+shape_goal[0]
         grasp_rot = np.dot(curr_quat.rotation_matrix, np.linalg.inv(best_quat.rotation_matrix))
-        grasp_quat = Quaternion(matrix=grasp_rot).elements
+        grasp_quat = np.array([.707,.707,0,0])# hack until I can get the angle stuff working Quaternion(matrix=grasp_rot).elements
         grasp = (grasp_translation, grasp_quat)
         ee_pose = (ee_trans, best_quat.elements)
         return ee_pose, grasp
@@ -154,6 +154,7 @@ class PegWorld():
         attachment = ut.Attachment(self.robot, self.grasp_joint, grasp_pose, self.shape_name_to_shape[shape_name])
         new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
         #ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
+        import ipdb; ipdb.set_trace()
         attachment.assign()
         self.in_hand = [attachment]
 
@@ -199,9 +200,9 @@ class PegWorld():
             if grasp_traj is not None:
                 working_grasp = grasp 
                 working_traj = grasp_traj
-                import ipdb; ipdb.set_trace()
         if visualize:
             pw.visualize_traj(working_traj)
+        import ipdb; ipdb.set_trace()
         pw.attach_shape(Rectangle, working_grasp)
         return grasp_traj
     """
