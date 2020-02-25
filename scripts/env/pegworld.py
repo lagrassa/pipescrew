@@ -203,7 +203,7 @@ class PegWorld():
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
         grasp_symmetries =  shape_class.grasp_symmetries()
-        self.grasp_offset = 0.015+self.franka_tool_to_pb_link
+        self.grasp_offset = -0.015+self.franka_tool_to_pb_link
         for sym in grasp_symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
