@@ -108,7 +108,7 @@ class PegWorld():
         #assert(Quaternion.absolute_distance(curr_quat, best_quat) < 0.01)
         best_quat = curr_quat #hack until I can get the angle stuff working
          
-        self.grasp_offset = grasp_offset+self.block_height*0.5
+        #self.grasp_offset = grasp_offset+self.block_height*0.5
         grasp_translation =np.array([0,0,self.grasp_offset])
         ee_trans = grasp_translation+shape_goal[0]
         grasp_rot = np.dot(curr_quat.rotation_matrix, np.linalg.inv(best_quat.rotation_matrix))
@@ -203,7 +203,7 @@ class PegWorld():
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
         grasp_symmetries =  shape_class.grasp_symmetries()
-        self.grasp_offset = -0.015+self.franka_tool_to_pb_link
+        self.grasp_offset = 0.015+self.franka_tool_to_pb_link
         for sym in grasp_symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
@@ -232,8 +232,6 @@ class PegWorld():
         if visualize:
             pw.visualize_traj(traj)
         return traj
-
-
 
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
