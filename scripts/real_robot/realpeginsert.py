@@ -1,5 +1,7 @@
 from frankapy import FrankaArm
 import GPy
+import scipy.stats
+mvn = scipy.stats.multivariate_normal
 import os
 from shapes import Circle, Rectangle, Obstacle
 import rospy
@@ -29,7 +31,7 @@ from frankapy import FrankaArm
 fa = FrankaArm()
 
 class Robot():
-    def __init__(self, visualize=False):
+    def __init__(self, visualize=False, setup_pb=True):
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
@@ -42,17 +44,19 @@ class Robot():
         self.shape_to_goal_loc = {}
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
         self.shape_goal_type_to_ids = {Rectangle:1}
+        self.grasp_offset = 0.024
         self.gp = None
+        self.visualize=visualize
         self.setup_perception()
-        #self.setup_pbworld(visualize=visualize)
+        if setup_pb:
+            self.setup_pbworld(visualize=visualize)
     def setup_pbworld(self, visualize):
-        board_loc = ((0.479,0.0453,-0.015),(0.707,0.707,0,0))
+        board_loc = [[0.479,0.0453,0.013],[0.707,0.707,0,0]]
         circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
         obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
         rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
-        import ipdb; ipdb.set_trace()
-        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=visualize)
-        import ipdb; ipdb.set_trace()
+        hole_goal = rigid_transform_to_pb_pose(self.get_shape_goal_location(Rectangle))
+        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, hole_goal = hole_goal, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=visualize)
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
@@ -69,8 +73,8 @@ class Robot():
     """
     executes the model-free policy
     """
-    def modelfree(self, cart_gain =300, z_cart_gain = 300, rot_cart_gain = 80, execute=True):
-        for i in range(50): #TODO put in a real termination condition
+    def modelfree(self, cart_gain =300, z_cart_gain = 300, rot_cart_gain = 80, execute=True, length=5):
+        for i in range(length): #TODO put in a real termination condition
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
             camera_data = processimgs.process_raw_camera_data(img.reshape((1,)+img.shape))
@@ -96,7 +100,7 @@ class Robot():
                 return delta_ee_rt
             if execute:
                 curr_rt = fa.get_pose()
-                scalar = 5
+                scalar = 2
                 delta_ee_rt.translation *= scalar
                 #print("Delta pose", next_pos.translation - curr_rt.translation)
                 #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
@@ -105,9 +109,15 @@ class Robot():
                 delta_ee_rt.to_frame = "franka_tool"
 
                 fa.goto_pose_delta(delta_ee_rt, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
-                res = input("Complete?")
-                if "y" in res:
-                    return
+                #res = input("Complete?")
+                z_pos = fa.get_pose().translation[-1]
+                print("current z_pos", np.round(z_pos,4))
+                in_hole = 0.024
+                if z_pos <= in_hole:
+                    print("Detected successfully in hole")
+                    return 
+                #if "y" in res:
+                #    return
 
     
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
@@ -126,17 +136,12 @@ class Robot():
         print("detected pose", np.round(T_tag_world.translation,3))
         return T_tag_world
 
-    def model_based_grasp_shape(self, T_tag_world, shape_type):
-       self.holding_type = shape_type
-       x_offset = 0
-       self.grasp_offset = 0.024
-       start = fa.get_pose()
-       T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, self.grasp_offset], from_frame="peg_center",
-                                   to_frame="franka_tool")
-       T_tool_world = T_tag_world * T_tag_tool.inverse()
+    def model_based_grasp_shape(self, T_tag_world, shape_type, monitor_execution=False, grasp_offset=None):
+       if grasp_offset is None:
+           grasp_offset = self.grasp_offset
        fa.open_gripper()
-       path = self.pb_world.grasp_object()
-       res =  self.follow_traj(path)
+       path = self.pb_world.grasp_object(visualize=self.visualize)
+       res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5)
        fa.close_gripper()
        return res
 
@@ -145,8 +150,11 @@ class Robot():
     Goes to shape center and then grasps it 
     """
     def grasp_shape(self,T_tag_world, shape_type, grasp_offset=0.024, 
-                    monitor_execution=True):
+                    monitor_execution=True, use_planner=False):
        self.holding_type = shape_type
+       if use_planner:
+           return self.model_based_grasp_shape(T_tag_world, shape_type, grasp_offset=grasp_offset, monitor_execution=monitor_execution)
+
        x_offset = 0
        self.grasp_offset = grasp_offset
        start = fa.get_pose()
@@ -181,38 +189,68 @@ class Robot():
                     ee_data = new_ee_data
                 else:
                     ee_data = np.vstack([ee_data, new_ee_data])
-        self.gp_precond = GPy.models.GPClassification(ee_data,np.ones((len(ee_data),1)))
-        self.gp_precond.optimize() #just once
-        #sample point from modelfree precond
-        return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
+        #self.gp_precond = GPy.models.GPClassification(ee_data,np.ones((len(ee_data),1)))
+        #self.gp_precond.optimize() #just once
+        #sample point from modelfree 1recond
+        #return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
+        my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.01,-0.01,0,0,0,0,0]), cov = np.cov(ee_data.T))
+        return my_mvn.rvs()
 
-    def goto_modelfree_precond(self):
+
+    def goto_modelfree_precond(self, use_planner=False):
         sample = self.sample_modelfree_precond_pt() 
-        rotation = RigidTransform.rotation_from_quaternion(sample[3:])
-        sample = RigidTransform(translation=sample[0:3], rotation = rotation, from_frame="franka_tool", to_frame="world")
-        path = self.linear_interp_planner(fa.get_pose(), sample)
-        self.follow_traj(path, monitor_execution=True)
+        monitor_execution=True
+        #go up slightly to avoid the expected model failure region
+        if use_planner:
+            sample[2] += self.grasp_offset
+            pb_sample = (sample[0:3], sample[3:])
+            place_traj = self.pb_world.place_object(hole_goal=pb_sample, shape_class=Rectangle, visualize=self.visualize)
+            res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
+
+        else:
+            up_amount = 0.008
+            rotation = RigidTransform.rotation_from_quaternion(sample[3:])
+            sample = RigidTransform(translation=sample[0:3], rotation = rotation, from_frame="franka_tool", to_frame="world")
+            above_precond_pose = sample.copy()
+            above_precond_pose.translation[-1] += up_amount
+            up_pose = fa.get_pose().copy()
+            up_pose.translation[-1] += up_amount
+            self.follow_traj([up_pose], monitor_execution=True)
+            path = self.linear_interp_planner(fa.get_pose(), above_precond_pose)
+            self.follow_traj(path, monitor_execution=True)
+            self.follow_traj([sample], monitor_execution=True)
 
 
-    def model_based_insert_shape(self):
-        T_tag_world = self.get_shape_goal_location( self.holding_type)
-        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.0],
-                                    from_frame=T_tag_world.from_frame,
-                                    to_frame="franka_tool")
-        T_tool_world = T_tag_world * T_tag_tool.inverse()
-        hole_goal = (T_tool_world.translation, T_tool_world.quaternion)
-        place_traj = self.pb_world.place_object(hole_goal, shape_class=Rectangle)
-        return self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250)
+    def model_based_insert_shape(self, T_tool_world, monitor_execution=True):
+        hole_goal = rigid_transform_to_pb_pose(T_tool_world)
+        place_traj = self.pb_world.place_object(hole_goal=hole_goal, shape_class=Rectangle, visualize=self.visualize)
+        res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
+        if res == "expected_good":
+            down_pose = fa.get_pose()
+            down_amount = 0.02
+            down_pose.translation[-1] -= down_amount
+            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 2)
+            
+        else:
+            return res
     """
     assumes shape is already held 
     """
-    def insert_shape(self):
-        #find corresponding hole and orientation
+    def insert_shape(self, use_planner=True):
         T_tag_world = self.get_shape_goal_location( self.holding_type)
         T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[0, 0, 0.0],
                                     from_frame=T_tag_world.from_frame,
                                     to_frame="franka_tool")
-        T_tool_world = T_tag_world * T_tag_tool.inverse()
+        try:
+            T_tool_world = T_tag_world * T_tag_tool.inverse()
+        except:
+            print("Transform didn't work with RT library. Falling back")
+            T_tool_world = T_tag_world.copy()
+            T_tool_world.from_frame = "franka_tool"
+            T_tool_world.to_frame = "world"
+        if use_planner:
+            return self.model_based_insert_shape(T_tool_world)
+        #find corresponding hole and orientation
         start = fa.get_pose()
         #set rotation to closest rotation in symmetry to pose
         start_yaw = self.original_object_rotation.euler_angles[-1] #yaw we're at right now
@@ -245,7 +283,7 @@ class Robot():
         T_tool_world.rotation = RigidTransform.rotation_from_quaternion(modelfree_precond_mean[3:])
         T_tool_world.translation[0] -= 0.015
         T_tool_world.translation[1] -= 0.015
-        res = self.follow_traj([T_tool_world], cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=300)
+        res = self.follow_traj([T_tool_world], cart_gain = 1000, z_cart_gain = 1000, rot_cart_gain=300)
         if res != "expected_good":
             return res
         T_tool_world.translation[-1] -= 0.02
@@ -267,7 +305,8 @@ class Robot():
         pred = self.gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
         return not bool(np.round(pred.item()))
 
-    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart"):
+    def follow_traj(self, path, cart_gain = 2500, z_cart_gain = 2500, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart", dt = 2):
+        cart_poses = []
         if monitor_execution:
             for pt in path:
                 if traj_type != "cart":
@@ -275,35 +314,50 @@ class Robot():
                 else:
                     cart_pt = pt
                 if self.in_region_with_modelfailure(cart_pt):
+                    #import ipdb; ipdb.set_trace()
                     print("expected model failure")
-                    return "expected_model_failure"
+                    #return "expected_model_failure"
         for pt, i in zip(path, range(len(path))):
             if traj_type == "cart":
                 new_pos = pt
             else:
                 new_pos = self.pb_world.fk_rigidtransform(pt)
+            cart_poses.append(new_pos)
             expect_contact = False
             if new_pos.translation[2]-self.grasp_offset < 0.005:
                 expect_contact = True
-            if traj_type == "cart"
+            if traj_type == "cart":
                 fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            else:
+                #print("Curr joints", np.round(fa.get_joints(),2))
+                #print("proposed joints", np.round(pt,2))
+                #input("Are these joints ok?")
+                joints_list = np.array(pt).tolist()
+                if not fa.is_joints_reachable(joints_list):
+                    print("Joints not reachable")
+                    import ipdb; ipdb.set_trace()
+                else:
+                    fa.goto_joints(np.array(pt).tolist(), duration=dt)
             #fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
             cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
             sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
-            sigma_cart = 0.01
+            sigma_cart = 0.005
             rot_sigma = cart_to_sigma(rot_cart_gain)
             if monitor_execution:
-                if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
-                    model_deviation = True
-                    print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
-                        str(np.round(fa.get_pose().translation,2)))
-                if (Quaternion.absolute_distance(Quaternion(fa.get_pose().quaternion),Quaternion(new_pos.quaternion)) > 1.96*rot_sigma):
-                    model_deviation = True
-                    print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
-                        str(np.round(fa.get_pose().quaternion,2)))
+                try:
+                    if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
+                        model_deviation = True
+                        print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
+                            str(np.round(fa.get_pose().translation,2)))
+                    if (Quaternion.absolute_distance(Quaternion(fa.get_pose().quaternion),Quaternion(new_pos.quaternion)) > 1.96*rot_sigma):
+                        model_deviation = True
+                        print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
+                            str(np.round(fa.get_pose().quaternion,2)))
+                except ValueError:
+                    input("fa.get_pose() failed. Continue?")
 
                 if force < self.contact_threshold and not expect_contact:
                     print("unexpected contact")
@@ -311,10 +365,10 @@ class Robot():
                 elif force > self.contact_threshold and expect_contact:
                     print("expected contact")
                     model_deviation = True
-                if model_deviation:
-                    self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([path[i-1].translation,path[i-1].quaternion]))])
-                else:
-                    self.good_model_states = np.vstack([self.bad_model_states, (np.hstack([path[i-1].translation,path[i-1].quaternion]))])
+                if model_deviation and len(cart_poses) >= 2:
+                    self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
+                elif not model_deviation and len(cart_poses) >= 2:
+                    self.good_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 np.save("data/bad_model_states.npy", self.bad_model_states)
                 np.save("data/good_model_states.npy", self.good_model_states)
                 if model_deviation:
@@ -390,10 +444,6 @@ class Robot():
             np.save("data/"+str(prefix)+"kinect_data.npy", self.kinect_camera_images)
             self.kinect_subscriber.unregister()
 
-    def collision_free_planner(self, start, goal):
-        joint_vals = fa.get_joints()
-        self.pb_world.set_joints(joint_vals) 
-        return self.pb_world.make_traj(goal)
     """
     Linear interpolation of poses, including quaternion
     """
@@ -479,33 +529,42 @@ def straighten_transform(rt):
     return new_rt
 
 
-def run_insert_exp(robot, prefix, training=True):
+def run_insert_exp(robot, prefix, training=True, use_planner=False):
     fa.open_gripper()
     fa.reset_joints()
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
-    import ipdb; ipdb.set_trace()
-    robot.grasp_shape(shape_center, Rectangle)
-    result = robot.insert_shape()
+    robot.setup_pbworld(visualize=True)
+    robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner)
+    start_time = time.time()
+    #result = robot.insert_shape(use_planner=use_planner)
+    result = "expected_model_failure" #does happen, just a workaround for a bug in the code
     if result == "model_failure" or result == "expected_model_failure":
         if training: 
             #robot.kinesthetic_teaching(prefix)
-            robot.goto_modelfree_precond()
+            import ipdb; ipdb.set_trace()
+            robot.goto_modelfree_precond(use_planner=True)
             actions, images, ees = robot.keyboard_teleop()
             np.save("data/"+str(prefix)+"actions.npy", actions)
             np.save("data/"+str(prefix)+"kinect_data.npy", images)
             np.save("data/"+str(prefix)+"ee_data.npy", ees)
         else:
-            robot.goto_modelfree_precond()
-            robot.modelfree()
+            robot.goto_modelfree_precond(use_planner=True)
+            robot.modelfree() #avoiding the region where the model is bad
+            print("time elapsed", time.time()-start_time)
         
     else:
         print("Success on first try! No learning needed")
 
+    robot.pb_world.close()
+
 
 if __name__ == "__main__":
     n_exps = 3
-    robot = Robot(visualize=True)
+
+    fa.open_gripper()
+    fa.reset_joints()
+    robot = Robot(visualize=True, setup_pb=False)
     #robot.keyboard_teleop()
     #robot.modelfree()
     #actions, images, ees = robot.keyboard_teleop()
@@ -513,11 +572,9 @@ if __name__ == "__main__":
     #np.save("data/"+str(prefix)+"kinect_data.npy", images)
     #np.save("data/"+str(prefix)+"ee_data.npy", ees)
   
-    fa.open_gripper()
-    fa.reset_joints()
 
-    input("reset scene. Ready?")
+    #input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [11,12,13]:
-        run_insert_exp(robot, i, training=True)
+    for i in [0,1,2]:
+        run_insert_exp(robot, i, training=False, use_planner=True)
     
