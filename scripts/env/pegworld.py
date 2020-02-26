@@ -14,19 +14,20 @@ ONLY TO BE USED FOR COLLISION DETECTION
 I am not focusing on making the dynamics of this at all realistic. 
 """
 class PegWorld():
-    def __init__(self, visualize=False, bullet=None, handonly=False, rectangle_loc = [[0.562, -0.003, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.38172045, -0.09062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
+    def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
+            obstacle_loc = [[ 0.62172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
             p.connect(p.DIRECT)
+         
         self.handonly = handonly
         p.setGravity(0,0,-9.8)
         self.in_hand = []
         self.setup_robot()
         self.steps_taken = 0
         self.franka_tool_to_pb_link = 0.055 #measured empirically
-        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal)
+        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal, load_previous=load_previous)
 
     """
     spawns a franka arm, eventually a FrankaArm object
@@ -53,7 +54,7 @@ class PegWorld():
     """
     table with a hollow and solid cylinder on it
     """
-    def setup_workspace(self, rectangle_loc = [[0.562, 0.003, 0.016], [1, 0.   ,  0.   ,  0   ]],
+    def setup_workspace(self, rectangle_loc = [[0.562, 0.003, 0.016], [1, 0.   ,  0.   ,  0   ]], load_previous=False, 
             circle_loc = [[0.425, 0.101, 0.01 ],[1, 0.  ,  0.  ,  0  ]],
             obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal = [[0.55, 0.08, 0.0],[1,0,0,0]]):
         #RigidTransform(rotation=np.array([[-5.78152806e-02, -9.98327119e-01,  4.84639353e-07],
@@ -86,6 +87,16 @@ class PegWorld():
         obstacle_loc[0][-1] = board_z+0.5*0.1
         hole_goal[0][-1] = board_z+0.5*0.001
         self.hole_goal = hole_goal
+        if load_previous:
+            rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
+            circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
+            obstacle_loc = np.load("saves/obstacle_loc.npy",allow_pickle=True)
+            hole_goal = np.load("saves/hole_loc.npy", allow_pickle=True)
+        else:
+            np.save("saves/rectangle_loc.npy", rectangle_loc)
+            np.save("saves/circle_loc.npy", circle_loc)
+            np.save("saves/obstacle_loc.npy", obstacle_loc)
+            np.save("saves/hole_loc.npy", hole_goal)
         ut.set_pose(self.rectangle, rectangle_loc)
         ut.set_pose(self.circle, circle_loc)
         ut.set_pose(self.obstacle, obstacle_loc)
@@ -94,7 +105,8 @@ class PegWorld():
         self.shape_name_to_shape[Circle] = self.circle
         self.shape_name_to_shape[Rectangle] = self.rectangle
         self.shape_name_to_shape[Obstacle] = self.obstacle
-        #input("workspace okay?")
+        input("workspace okay?")
+        p.saveBullet("curr_state.bt")
 
     def get_closest_ee_goals(self, shape_goal, shape_class=Rectangle, grasp_offset = 0.055):
         #symmetry that minimizes the distance between shape_goal and the current ee pose. 
@@ -192,7 +204,7 @@ class PegWorld():
     def visualize_traj(self, path):
         for pt in path:
             self.set_joints(pt)
-            #input("ready for next set?")
+            input("ready for next set?")
     def visualize_points(self, pt_set):
         for pt in pt_set:
             pb_pt = ut.create_sphere(0.005)
@@ -247,6 +259,8 @@ class PegWorld():
         if hole_goal is None:
             hole_goal = self.hole_goal.copy()
             hole_goal[0][-1] = 0.03
+        else:
+            np.save("custom_hole_goal.npy", hole_goal)
         traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle) 
         if push_down:
             state = p.saveState()
@@ -271,7 +285,7 @@ class PegWorld():
 
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
-    pw = PegWorld(visualize=True, handonly = False)
+    pw = PegWorld(visualize=True, handonly = False, load_previous=False)
     pw.grasp_object(shape_class=Rectangle, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
     pw.place_object(shape_class=Rectangle, visualize=True)
