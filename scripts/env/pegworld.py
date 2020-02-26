@@ -243,24 +243,23 @@ class PegWorld():
     """
     Collision-free trajectory  to place object in hole
     """
-    def place_object(self, visualize=False, shape_class=Rectangle, hole_goal=None):
+    def place_object(self, visualize=False, shape_class=Rectangle, hole_goal=None, push_down=True):
         if hole_goal is None:
             hole_goal = self.hole_goal.copy()
             hole_goal[0][-1] = 0.03
-        import ipdb; ipdb.set_trace()
-        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle)
+        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle) 
+        if push_down:
+            state = p.saveState()
+            #Move in that last bit
+            joint_vals = traj[-1]
+            ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
+            goal_pose = self.fk_rigidtransform(traj[-1], return_rt=False)
+            new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-0.7*self.hole_depth)
+            end_traj = self.make_traj((new_trans, goal_pose[1]),in_board = True)
+            print(len(end_traj), "length end traj")
 
-        state = p.saveState()
-        #Move in that last bit
-        joint_vals = traj[-1]
-        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
-        goal_pose = self.fk_rigidtransform(traj[-1], return_rt=False)
-        new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-0.7*self.hole_depth)
-        end_traj = self.make_traj((new_trans, goal_pose[1]),in_board = True)
-        print(len(end_traj), "length end traj")
-
-        p.restoreState(state)
-        traj += end_traj
+            p.restoreState(state)
+            traj += end_traj
         # end moving in that last bit
         if visualize:
             self.visualize_traj(traj)
