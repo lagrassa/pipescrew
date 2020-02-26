@@ -79,6 +79,7 @@ class PegWorld():
         self.obstacle = ut.create_box(0.08, 0.04, 0.08, color = (0.5,0.5,0.5,1))
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
         board_z = 0.013+0.005
+        #The perception z axis estimates are bad so let's use prior information to give it the right pose  
         rectangle_loc[0][-1] = board_z+0.5*block_height
         circle_loc[0][-1] = board_z+0.5*block_height
         obstacle_loc[0][-1] = board_z+0.5*0.08
@@ -203,7 +204,7 @@ class PegWorld():
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
         grasp_symmetries =  shape_class.grasp_symmetries()
-        self.grasp_offset = 0.015+self.franka_tool_to_pb_link
+        self.grasp_offset = 0.025+self.franka_tool_to_pb_link
         for sym in grasp_symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
