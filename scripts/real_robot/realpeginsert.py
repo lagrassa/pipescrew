@@ -1,6 +1,7 @@
 from frankapy import FrankaArm
 import GPy
 import os
+from shapes import Circle, Rectangle, Obstacle
 import rospy
 from pyquaternion import Quaternion
 import cv_bridge
@@ -27,81 +28,8 @@ from utils.conversion_scripts import rigid_transform_to_pb_pose
 from frankapy import FrankaArm
 fa = FrankaArm()
 
-class Circle:
-    pass
-class Obstacle:
-    def __init__(self):
-        pass
-    @staticmethod
-    def symmetries():
-        return [-np.pi,-np.pi/2, 0, np.pi/2, np.pi]
-    @staticmethod
-    def tforms_to_pose(ids, tforms,goal=False):
-        rectangles_ids = [8,9,10,11]
-        relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
-        relevant_tforms = []
-        for id_num in relevant_ids:
-            tform_idx = ids.index(id_num)
-            relevant_tforms.append(tforms[tform_idx])
-        
-        avg_rotation = relevant_tforms[0]
-        for i in range(1, len(relevant_tforms)):
-            avg_rotation = avg_rotation.interpolate_with(relevant_tforms[i], 0.5)
-
-        if len(relevant_ids) == 4:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 8 in relevant_ids and 10 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 9 in relevant_ids and 11 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        else:
-            print(relevant_ids)
-            print("Not enough detections to make accurate pose estimate")
-
-        return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
-
-class Square:
-    pass
-class Rectangle:
-    def __init__(self):
-        pass
-    @staticmethod
-    def symmetries():
-        return [-np.pi, 0, np.pi]
-    """
-    returns the intervals of rotation that are identical, at least enough to be useful. 
-    The triangle can't be rotated but the rectangle can be inserted at any interval of 3.14
-    """
-    @staticmethod
-    def tforms_to_pose(ids, tforms,goal=False):
-        if goal:
-            rectangles_ids = [4,5,6,7]
-        else:
-            rectangles_ids = [0,1,2,3]
-        relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
-        relevant_tforms = []
-        for id_num in relevant_ids:
-            tform_idx = ids.index(id_num)
-            relevant_tforms.append(tforms[tform_idx])
-        
-        avg_rotation = relevant_tforms[0]
-        for i in range(1, len(relevant_tforms)):
-            avg_rotation = avg_rotation.interpolate_with(relevant_tforms[i], 0.5)
-
-        if len(relevant_ids) == 4:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 0 in relevant_ids and 2 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 1 in relevant_ids and 3 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        else:
-            print(relevant_ids)
-            print("Not enough detections to make accurate pose estimate")
-
-        return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
-
 class Robot():
-    def __init__(self):
+    def __init__(self, visualize=False):
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
@@ -116,13 +44,15 @@ class Robot():
         self.shape_goal_type_to_ids = {Rectangle:1}
         self.gp = None
         self.setup_perception()
-        #self.setup_pbworld()
-    def setup_pbworld(self):
-        board_loc = ((0,0,0),(1,0,0,0))
-        circle_loc = ((0.3,0.2,0),(1,0,0,0)) #acquire from darknet
-        obstacle_loc = ((0.2,0.1,0),(1,0,0,0)) #TODO acquire from perception
+        #self.setup_pbworld(visualize=visualize)
+    def setup_pbworld(self, visualize):
+        board_loc = ((0.479,0.0453,-0.015),(0.707,0.707,0,0))
+        circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
+        obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
         rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
-        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc)
+        import ipdb; ipdb.set_trace()
+        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=visualize)
+        import ipdb; ipdb.set_trace()
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
@@ -193,15 +123,16 @@ class Robot():
         T_tag_world = self.T_camera_world * T_tag_camera
         if straighten:
             T_tag_world  = straighten_transform(T_tag_world)
-        print("detected pose", np.round(T_tag_world.translation,2))
+        print("detected pose", np.round(T_tag_world.translation,3))
         return T_tag_world
     """
     Goes to shape center and then grasps it 
     """
-    def grasp_shape(self,T_tag_world, shape_type):
+    def grasp_shape(self,T_tag_world, shape_type, grasp_offset=0.024, 
+                    monitor_execution=True):
        self.holding_type = shape_type
        x_offset = 0
-       self.grasp_offset = 0.024
+       self.grasp_offset = grasp_offset
        start = fa.get_pose()
        T_tag_tool = RigidTransform(rotation=np.eye(3), translation=[x_offset, 0, self.grasp_offset], from_frame="peg_center",
                                    to_frame="franka_tool")
@@ -212,14 +143,17 @@ class Robot():
        planned_yaw = T_tool_world.euler_angles[-1] #yaw we need to go to 
        grasp_symmetries = [-np.pi,-np.pi/2, 0, np.pi/2, np.pi]
        best_symmetry_idx = np.argmin([np.linalg.norm((planned_yaw+sym)-start_yaw ) for sym in grasp_symmetries]) #wraparound :c
-       best_correct_yaw = grasp_symmetries[best_symmetry_idx]
-       good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
-       T_tool_world.rotation = np.dot(good_rotation, start.rotation)
-       #T_tool_world.rotation = start.rotation
-       
+    #    best_correct_yaw = grasp_symmetries[best_symmetry_idx]
+    #    good_rotation = RigidTransform.z_axis_rotation((planned_yaw+best_correct_yaw) -start_yaw)
+    #    T_tool_world.rotation = start.rotation
+       T_tool_world_fixed_rot = RigidTransform(rotation=fa.get_pose().rotation,
+            translation=T_tool_world.translation, from_frame="franka_tool",
+            to_frame="world")
+
        fa.open_gripper()
-       path = self.linear_interp_planner(start, T_tool_world)
-       self.follow_traj(path)
+    #    path = self.linear_interp_planner(start, T_tool_world)
+       path = self.linear_interp_planner(fa.get_pose(), T_tool_world_fixed_rot)
+       self.follow_traj(path, monitor_execution=monitor_execution)
        fa.close_gripper()
 
     def sample_modelfree_precond_pt(self):
@@ -328,6 +262,7 @@ class Robot():
             model_deviation = False
             cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
             sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
+            sigma_cart = 0.01
             rot_sigma = cart_to_sigma(rot_cart_gain)
             if monitor_execution:
                 if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
@@ -518,11 +453,13 @@ def run_insert_exp(robot, prefix, training=True):
     fa.reset_joints()
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
+    import ipdb; ipdb.set_trace()
     robot.grasp_shape(shape_center, Rectangle)
     result = robot.insert_shape()
     if result == "model_failure" or result == "expected_model_failure":
         if training: 
             #robot.kinesthetic_teaching(prefix)
+            robot.goto_modelfree_precond()
             actions, images, ees = robot.keyboard_teleop()
             np.save("data/"+str(prefix)+"actions.npy", actions)
             np.save("data/"+str(prefix)+"kinect_data.npy", images)
@@ -537,7 +474,7 @@ def run_insert_exp(robot, prefix, training=True):
 
 if __name__ == "__main__":
     n_exps = 3
-    robot = Robot()
+    robot = Robot(visualize=True)
     #robot.keyboard_teleop()
     #robot.modelfree()
     #actions, images, ees = robot.keyboard_teleop()
@@ -550,6 +487,6 @@ if __name__ == "__main__":
 
     input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [6,7,8,9,10]:
-        run_insert_exp(robot, i, training=False)
+    for i in [11,12,13]:
+        run_insert_exp(robot, i, training=True)
     
