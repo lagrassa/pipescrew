@@ -57,7 +57,9 @@ class Rectangle:
         pass
     @staticmethod
     def symmetries():
-        return [-np.pi, 0, np.pi]
+        return np.array([-np.pi, 0, np.pi])
+    def grasp_symmetries():
+        return np.array([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
     """
     returns the intervals of rotation that are identical, at least enough to be useful. 
     The triangle can't be rotated but the rectangle can be inserted at any interval of 3.14
