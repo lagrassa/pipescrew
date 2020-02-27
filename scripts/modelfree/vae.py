@@ -58,24 +58,29 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     output_dim = image_size_x*image_size_y*n_channels
     # network parameters 640x360 image
     input_shape = (image_size_x*image_size_y*n_channels,)
-    intermediate_dim = 30
-    latent_dim = 20
+    intermediate_dim = 250
+    latent_dim = 5
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
     x = kl.Reshape((image_size_x, image_size_y, n_channels))(inputs)
-    x = kl.Conv2D(32,(3,3), padding="same")(x)
-    x = kl.Conv2D(16, (2,2), padding="same")(x)
-    x = kl.Conv2D(16, (2,2), padding="same")(x)
+    x = kl.Conv2D(32,(5,5), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
+    x = kl.Conv2D(16, (3,3), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
+    #x = kl.Conv2D(16, (3,3), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
     x = kl.GaussianNoise(0.001)(x)
     ##x = kl.Conv2D(64,(7,7), padding="same")(x)
     ##x = kl.Conv2D(32, (5,5), padding="same")(x)
     ##x = kl.Conv2D(16, (5,5), padding="same")(x)
-    x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
-    #x = kl.Flatten()(x)
-    x = Dense(latent_dim)(inputs)
-    x = kl.Dropout(0.2)(x)
+    #x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
+    x = kl.Flatten()(x)
+    #x = kl.Dropout(0.5)(x)
+    x = Dense(2)(x)
+    x = Dense(latent_dim)(x)
+    #x = kl.Dropout(0.2)(x)
     x = Dense(image_size_x*image_size_y)(x)
     z_mean = Dense(latent_dim, name='z_mean')(x)
     z_log_var = Dense(latent_dim, name='z_log_var')(x)
@@ -87,6 +92,7 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     # build decoder model
     latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
     x = Dense(intermediate_dim, activation='relu')(latent_inputs)
+    x = kl.Dropout(0.5)(x)
     x = Dense(output_dim, activation='sigmoid')(x)
     # instantiate decoder model
     decoder = Model(latent_inputs, x, name='decoder')
@@ -234,8 +240,8 @@ if __name__ == '__main__':
     input_shape = (original_dim, )
     intermediate_dim = 512
     batch_size = 128
-    latent_dim = 2
-    epochs = 50
+    latent_dim = 20
+    epochs = 100
 
     # VAE model = encoder + decoder
     # build encoder model
