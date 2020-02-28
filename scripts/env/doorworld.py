@@ -144,7 +144,7 @@ class PegWorld():
     def visualize_traj(self, path):
         for pt in path:
             self.set_joints(pt)
-            #input("ready for next set?")
+            input("ready for next set?")
     def visualize_points(self, pt_set):
         for pt in pt_set:
             pb_pt = ut.create_sphere(0.005)
@@ -201,7 +201,7 @@ class PegWorld():
         start_pose = ut.get_link_pose(self.robot, self.grasp_joint)
         start_quat = start_pose[1]
         amount_rotate = np.pi/4.
-        rot_y = RigidTransform.y_axis_rotation(amount_rotate)
+        rot_y = RigidTransform.x_axis_rotation(amount_rotate)
         end_rot=np.dot(rot_y,Quaternion(start_quat).rotation_matrix)
         end_quat = Quaternion(matrix=end_rot).elements
         step_size = np.pi/16.
@@ -211,9 +211,9 @@ class PegWorld():
         n_waypoints =np.round((end_theta-theta)/(step_size))
         thetas = np.linspace(theta, end_theta,n_waypoints)
         r = 0.10
-        center = self.door_knob_center
+        center = self.door_knob_center.copy()
+        center[1] -= 0.055 #franka_tool to 9/10 pose
         pos_traj = []
-        p.removeBody(0)
         for theta, quat in zip(thetas, quat_waypoints):
             new_pt = (center[0]+r*np.cos(theta), center[1], center[2]+r*np.sin(theta))
             pos_traj.append((new_pt, quat[1]))
@@ -222,8 +222,17 @@ class PegWorld():
         joints_to_plan_for = ut.get_movable_joints(self.robot)[:-2]
         traj = []
         for pos in pos_traj:
-            new_jts = ut.inverse_kinematics(self.robot, self.grasp_joint, pos,movable_joints = joints_to_plan_for,null_space=self.get_null_space(joints_to_plan_for))
-            traj.append(new_jts)
+            new_jts = ut.inverse_kinematics(self.robot, self.grasp_joint, pos,movable_joints = joints_to_plan_for,null_space=self.get_null_space(joints_to_plan_for), ori_tolerance=0.02)
+            if new_jts is not None:
+                traj.append(new_jts)
+            else:
+                new_jts = ut.inverse_kinematics(self.robot, self.grasp_joint, pos,movable_joints = joints_to_plan_for,null_space=None, ori_tolerance=0.03)
+                if new_jts is None:
+                    print("no jt solution found")
+                else:
+                    traj.append(new_jts)
+
+        assert(len(traj) > 0)
         if visualize:
             self.visualize_traj(traj)
         n_pts = min(10, len(traj))
