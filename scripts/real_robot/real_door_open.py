@@ -1,13 +1,24 @@
 from frankapy import FrankaArm
+import GPy
 import numpy as np
+from pyquaternion import Quaternion
 import rospy
 import argparse
+from env.doorworld import  import DoorWorld
 from cv_bridge import CvBridge, CvBridgeError
 from autolab_core import RigidTransform, Point
+from franka_action_lib.msg import RobotState
 
 # need to check that franka_arm.py is actually sending the gain values to ros in the skill.send_goal
 #need to check c++ is receiving them too
-
+try:
+    bad_model_states = np.load("data/door_bad_model_states.npy")
+    good_model_states = np.load("data/door_bad_model_states.npy")
+except FileNotFoundError:
+    bad_model_states = []
+    good_model_states = []
+CONTACT_THRESHOLD=-1.7
+gp = None
 def go2start(fa, joint_gains=None, cart_gains=None):
     """
     Resets joints to home and goes to starting position near door
@@ -61,7 +72,102 @@ def go2start(fa, joint_gains=None, cart_gains=None):
                0.23962597, 2.6992652, 0.82820212]
     fa.goto_joints(joints3, duration=5, joint_impedances=joint_gains)
 
-def go2door(fa, gains=None, close_gripper=False):
+def feelforce():
+    ros_data = rospy.wait_for_message("/robot_state_publisher_node_1/robot_state", RobotState)
+    force = ros_data.O_F_ext_hat_K
+    return force[2]
+
+
+def in_region_with_modelfailure(pt, retrain=True):
+    if retrain:
+        bad = np.load("data/door_bad_model_states.npy", allow_pickle=True)
+        good = np.load("data/door_good_model_states.npy", allow_pickle=True)
+        if len(bad) == 0 and len(good) == 0:
+            return False
+        X = np.vstack([good, bad])
+        Y = np.vstack([np.ones((len(good),1)), np.zeros((len(bad),1))])
+        if gp is None:
+            gp = GPy.models.GPClassification(X,Y)
+            for i in range(6):
+                gp.optimize()
+    pred = gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
+    return not bool(np.round(pred.item()))
+
+def follow_traj(fa,path, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain = 300,
+                expect_contact=False,
+                pb_world=None, monitor_execution=True, traj_type = "joint", dt = 8):
+    cart_poses = []
+    if monitor_execution:
+        for pt in path:
+            if traj_type != "cart":
+                cart_pt = pb_world.fk_rigidtransform(pt)
+            else:
+                cart_pt = pt
+            if in_region_with_modelfailure(cart_pt):
+                #import ipdb; ipdb.set_trace()
+                print("expected model failure")
+                #return "expected_model_failure"
+    for pt, i in zip(path, range(len(path))):
+        if traj_type == "cart":
+            new_pos = pt
+        else:
+            new_pos = pb_world.fk_rigidtransform(pt)
+        cart_poses.append(new_pos)
+        if traj_type == "cart":
+            fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+        else:
+            #print("Curr joints", np.round(fa.get_joints(),2))
+            #print("proposed joints", np.round(pt,2))
+            #input("Are these joints ok?")
+            joints_list = np.array(pt).tolist()
+            if not fa.is_joints_reachable(joints_list):
+                print("Joints not reachable")
+                import ipdb; ipdb.set_trace()
+            else:
+                fa.goto_joints(np.array(pt).tolist(), duration=dt)
+        force = feelforce()
+        model_deviation = False
+        cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
+        sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
+        sigma_cart = 0.008
+        rot_sigma = cart_to_sigma(rot_cart_gain)
+        if monitor_execution:
+            try:
+                if (np.abs(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
+                    model_deviation = True
+                    print("Farther than expected. Expected "+str(np.round(new_pos.translation,2))+" but got "+
+                          str(np.round(fa.get_pose().translation,2)))
+                if (Quaternion.absolute_distance(Quaternion(fa.get_pose().quaternion),Quaternion(new_pos.quaternion)) > 1.96*rot_sigma):
+                    model_deviation = True
+                    print("Farther than expected. Expected "+str(np.round(new_pos.quaternion,2))+" but got "+
+                          str(np.round(fa.get_pose().quaternion,2)))
+            except ValueError:
+                input("fa.get_pose() failed. Continue?")
+
+            if force < CONTACT_THRESHOLD and not expect_contact:
+                print("unexpected contact")
+                model_deviation = True
+            elif force > CONTACT_THRESHOLD and expect_contact:
+                print("expected contact")
+                model_deviation = True
+            if model_deviation and len(cart_poses) >= 2:
+                new_bad_state = np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion])
+                if len(bad_model_states) ==0:
+                    bad_model_states = new_bad_state
+                bad_model_states = np.vstack([bad_model_states, new_bad_state])
+            elif not model_deviation and len(cart_poses) >= 2:
+                if len(good_model_states) == 0:
+                    new_good_state = (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))
+                good_model_states = np.vstack([good_model_states,new_good_state])
+            np.save("data/door_bad_model_states.npy", bad_model_states)
+            np.save("data/door_good_model_states.npy", good_model_states)
+            if model_deviation:
+                print("Ending MB policy due to model deviation")
+                return("model_failure")
+    if monitor_execution:
+        return "expected_good"
+
+def go2door(fa, gains=None, close_gripper=False, use_planner = False, world=None):
     """
     Goes to door handle
 
@@ -69,6 +175,10 @@ def go2door(fa, gains=None, close_gripper=False):
         fa: franka arm object
         gains: cartesian_impedances gains to use
     """
+    if use_planner:
+        traj = world.grasp_object()
+        result = follow_traj(traj, monitor_execution=True)
+        return result
     if gains is None:
         gains = [1000,1000,1000,50,50,50]
     
@@ -124,7 +234,7 @@ def go2start_from_door(fa):
     fa.goto_joints(joints2, duration=5, joint_impedances=joint_gains)
     print("Done")
 
-def turn_knob(fa, steps=5, step_duration=5, gains=None):
+def turn_knob(fa, steps=5, step_duration=5, gains=None, use_planner = False, world=None):
     """
     Turn door handle
 
@@ -134,6 +244,12 @@ def turn_knob(fa, steps=5, step_duration=5, gains=None):
         step_duration: time to run each step for in seconds
         gains: cartesian_impedances gains to use
     """
+    if use_planner:
+        traj = world.grasp_object()
+        result = follow_traj(traj, monitor_execution=True)
+        return result
+
+
     if gains is None:
         gains = [1000,1000,1000,1,1,1]
 
@@ -172,6 +288,7 @@ def pull_door(fa, duration=5.0, gains=None, open_gripper=True):
     if open_gripper:
         fa.open_gripper()
 
+
 if __name__ == '__main__':
     # Examples and for collecting robot poses
     # Everything is hard coded :/
@@ -179,15 +296,23 @@ if __name__ == '__main__':
     print('Starting robot')
     fa = FrankaArm()
     go2start(fa)
-
+    dw = DoorWorld()
     print(fa.get_pose())
     print(fa.get_joints())
 
     input("Press enter to continue")
-    go2door(fa, close_gripper=True)
+    go2door(fa, close_gripper=True, use_planner = True, world=dw)
     fa.close_gripper()
 
-    turn_knob(fa)
+    res = turn_knob(fa, use_planner = True, world = dw)
+    if res == "expected_model_failure" or res == "model_deviation":
+        gains1 = [1000,1000,1000,1,1,1]
+        dmp_info2 = "/home/stevenl3/misc_backups/robot_data_door_turn2_position_weights.pkl"
+        fa.execute_position_dmp(dmp_info2, duration=10,
+            skill_desc='position_dmp', cartesian_impedance=gains1)
+    else:
+        print("Worked as expected!")
+
 
     input("Press enter to continue")
     pull_door(fa)
