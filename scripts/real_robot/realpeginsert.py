@@ -73,7 +73,7 @@ class Robot():
     """
     executes the model-free policy
     """
-    def modelfree(self, cart_gain =500, z_cart_gain = 500, rot_cart_gain = 100, execute=True, length=8):
+    def modelfree(self, cart_gain =1200, z_cart_gain = 1200, rot_cart_gain = 60, execute=True, length=10):
         for i in range(length): #TODO put in a real termination condition
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
@@ -108,7 +108,7 @@ class Robot():
                 delta_ee_rt.from_frame = "franka_tool"
                 delta_ee_rt.to_frame = "franka_tool"
 
-                fa.goto_pose_delta(delta_ee_rt) #, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+                fa.goto_pose_delta(delta_ee_rt,cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
                 #res = input("Complete?")
                 z_pos = fa.get_pose().translation[-1]
                 print("current z_pos", np.round(z_pos,4))
@@ -193,7 +193,7 @@ class Robot():
         #self.gp_precond.optimize() #just once
         #sample point from modelfree 1recond
         #return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
-        my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.01,-0.01,0,0,0,0,0]), cov = np.cov(ee_data.T))
+        my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.00,-0.00,0,0,0,0,0]), cov = np.cov(ee_data.T))
         return my_mvn.rvs()
 
 
@@ -205,7 +205,6 @@ class Robot():
             sample[2] += 0.02 #keep it out of the board
             sample[2] -= self.grasp_offset #keep it out of the board
             pb_sample = (sample[0:3], sample[3:])
-            import ipdb; ipdb.set_trace()
             place_traj = self.pb_world.place_object(hole_goal=pb_sample, shape_class=Rectangle, visualize=True, push_down = False)
             res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
 
@@ -225,7 +224,7 @@ class Robot():
 
     def model_based_insert_shape(self, T_tool_world, monitor_execution=True):
         hole_goal = rigid_transform_to_pb_pose(T_tool_world)
-        place_traj = self.pb_world.place_object(hole_goal=hole_goal, shape_class=Rectangle, visualize=True)
+        place_traj = self.pb_world.place_object(shape_class=Rectangle, visualize=True)
         res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
         if res == "expected_good":
             down_pose = fa.get_pose()
@@ -370,7 +369,7 @@ class Robot():
                 if model_deviation and len(cart_poses) >= 2:
                     self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 elif not model_deviation and len(cart_poses) >= 2:
-                    self.good_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
+                    self.good_model_states = np.vstack([self.good_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 np.save("data/bad_model_states.npy", self.bad_model_states)
                 np.save("data/good_model_states.npy", self.good_model_states)
                 if model_deviation:
@@ -482,6 +481,9 @@ class Robot():
                 res = input("input OK?")
                 if "y" in res:
                     print("adding to set")
+                    rt = suggested_rt
+                    rt.from_frame = "franka_tool"
+                    rt.to_frame = "franka_tool"
                 else:
                     continue
             if "q" in val:
@@ -501,8 +503,8 @@ class Robot():
             imgs.append(img) 
             ee = fa.get_pose()
             ee_rts.append(ee) 
-            rt.translation += np.random.uniform(low = -0.003, high = 0.003, size=rt.translation.shape)
-            fa.goto_pose_delta(rt, cartesian_impedances=[500, 500, 500, 50, 50, 50]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+            #rt.translation += np.random.uniform(low = -0.001, high = 0.001, size=rt.translation.shape)
+            fa.goto_pose_delta(rt, cartesian_impedances=[1200, 1200, 1200, 60, 60, 60]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             delta_rts.append(rt)
             transes = []
             ee_transes = []
@@ -540,6 +542,9 @@ def run_insert_exp(robot, prefix, training=True, use_planner=False):
     robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner)
     start_time = time.time()
     #result = robot.insert_shape(use_planner=use_planner)
+    robot.insert_shape(use_planner=True)
+    print("time elapsed", time.time()-start_time)
+    return
     result = "expected_model_failure" #does happen, just a workaround for a bug in the code
     if result == "model_failure" or result == "expected_model_failure":
         if training: 
@@ -565,10 +570,7 @@ if __name__ == "__main__":
     
     fa.open_gripper()
     fa.reset_joints()
-    robot = Robot(visualize=False, setup_pb=False)
-    #robot.modelfree()
-    #robot.modelfree()
-    #robot.keyboard_teleop()
+    robot = Robot(visualize=True, setup_pb=False)
     #robot.modelfree()
     #import ipdb; ipdb.set_trace()
     #actions, images, ees = robot.keyboard_teleop()
@@ -579,6 +581,6 @@ if __name__ == "__main__":
 
     #input("reset scene. Ready?")
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [14,15,16,17]:
+    for i in [18,19,20,21,22]: #18 is where we do DAGGER
         run_insert_exp(robot, i, training=False, use_planner=True)
     
