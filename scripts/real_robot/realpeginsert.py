@@ -340,8 +340,6 @@ class Robot():
                     import ipdb; ipdb.set_trace()
                 else:
                     fa.goto_joints(np.array(pt).tolist(), duration=dt)
-            #fa.goto_pose(new_pos) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
-            #consider breaking this one up to make it smoother
             force = self.feelforce()
             model_deviation = False
             cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
@@ -370,7 +368,7 @@ class Robot():
                 if model_deviation and len(cart_poses) >= 2:
                     self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 elif not model_deviation and len(cart_poses) >= 2:
-                    self.good_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
+                    self.good_model_states = np.vstack([self.good_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 np.save("data/bad_model_states.npy", self.bad_model_states)
                 np.save("data/good_model_states.npy", self.good_model_states)
                 if model_deviation:
@@ -378,6 +376,7 @@ class Robot():
                     return("model_failure")
         if monitor_execution:
             return "expected_good"
+
     def train_model(self):
         self.high_state = [0.4,0.4,0.05]
         self.low_state = [-0.4, -0.4, 0.00]
