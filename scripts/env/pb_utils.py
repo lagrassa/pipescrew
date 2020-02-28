@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import colorsys
+from pyquaternion import Quaternion
 import json
 import math
 import os
@@ -3037,9 +3038,7 @@ def is_pose_close(pose, target_pose, pos_tolerance=5e-3, ori_tolerance=5e-3*np.p
     (target_point, target_quat) = target_pose
     if (target_point is not None) and not np.allclose(point, target_point, atol=pos_tolerance, rtol=0):
         return False
-    if (target_quat is not None) and not np.allclose(quat, target_quat, atol=ori_tolerance, rtol=0):
-        # TODO: account for quaternion redundancy
-        import ipdb; ipdb.set_trace()
+    if (target_quat is not None) and not Quaternion.absolute_distance(Quaternion(quat), Quaternion(target_quat)) < ori_tolerance:
         return False
     return True
 
@@ -3059,6 +3058,8 @@ def inverse_kinematics(robot, link, target_pose, movable_joints = None, max_iter
             lower_limits, upper_limits = get_custom_limits(robot, movable_joints, custom_limits)
             if all_between(lower_limits, kinematic_conf[:len(movable_joints)], upper_limits):
                 break
+            else:
+                print("solution found but violates joint limits")
     else:
         return None
     return kinematic_conf
