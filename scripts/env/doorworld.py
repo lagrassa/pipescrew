@@ -54,7 +54,7 @@ class DoorWorld():
     """
     def setup_workspace(self):
         self.door = p.loadURDF("../../models/door.urdf")
-        door_pt = ([0.31, 0.56535375, 0])
+        door_pt = ([0.31, 0.56535375-0.02, 0])
         door_quat = (.707,0,0,.707)
         ut.set_pose(self.door,(door_pt, door_quat))
         self.door_knob_center = [0.61257949, 0.47, 0.4615]
@@ -241,8 +241,8 @@ class DoorWorld():
         return traj
 
 if __name__ == "__main__":
-    #pw = PegWorld( visualize=False, handonly=False)
-    pw = PegWorld(visualize=True, handonly = False, load_previous=False)
+    #pw = PegWorld( visualize=False, handonly/do=False)
+    pw = DoorWorld(visualize=True, handonly = False, load_previous=False)
     pw.grasp_object(visualize=True)
     pw.turn_handle(visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
