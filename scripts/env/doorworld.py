@@ -13,7 +13,7 @@ from  env.pb_utils import create_cylinder, set_point, set_pose, simulate_for_dur
 ONLY TO BE USED FOR COLLISION DETECTION
 I am not focusing on making the dynamics of this at all realistic. 
 """
-class PegWorld():
+class DoorWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
             obstacle_loc = [[ 0.62172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
@@ -135,8 +135,7 @@ class PegWorld():
         else:
             return (link_trans, link_quat)
 
-    def detach_shape(self, shape_name):
-        self.in_hand = []
+
     def set_joints(self, joint_vals):
         ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
         for attachment in self.in_hand:
@@ -152,7 +151,7 @@ class PegWorld():
     """
     Collision-free trajectory  to place object in hole
     """
-    def grasp_object(self, visualize=False):
+    def grasp_object(self, visualize=True):
         #shape_goal = p.getBasePositionAndOrientation(self.rectangle)
         shape_pt = ([0.61257949, 0.46935375, 0.46155012])
         shape_pt[1] -= 0.055 #franka_tool to 9/10 pose
