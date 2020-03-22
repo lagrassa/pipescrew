@@ -1,6 +1,6 @@
 from pipeworld import PipeWorld
 import time
-from history import History
+from agent.history import History
 from collections import deque
 import pybullet as p
 import numpy as np
@@ -38,7 +38,10 @@ class PegInsertEnv():
         target_point_2 = np.array(get_pose(self.pw.pipe))[0]+grasp
         target_quat = (1,0.5,0,0) #get whatever it is by default
         target_pose = (target_point_1, target_quat)
-        obstacles = [self.pw.pipe, self.pw.hollow]
+        if isinstance(self.pw.hollow, list):
+            obstacles = [self.pw.pipe]+self.pw.hollow
+        else:
+            obstacles = [self.pw.pipe, self.pw.hollow]
         self.go_to_pose(target_pose, obstacles=obstacles)
         target_pose = (target_point_2, target_quat)
         self.go_to_pose(target_pose, obstacles=obstacles)
@@ -48,8 +51,9 @@ class PegInsertEnv():
         return False #TODO make this actually check collision        
     def place(self, use_policy=False):
         grasp = np.array([0,0,0.3])
-        target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
-        self.hollow_pose = get_pose(self.pw.hollow)
+        hollow_pt = np.mean([get_pose(obj)[0] for obj in self.pw.hollow],axis=0)
+        target_point =hollow_pt+grasp
+        self.hollow_pose = hollow_pt
         target_quat = (1,0.5,0,0)
         target_pose = (target_point, target_quat)
         lift_point = np.array(p.getLinkState(self.pw.robot, self.finger_joints[0])[0])+grasp
@@ -131,7 +135,7 @@ class PegInsertEnv():
     def step(self, action):
         dx, dy, dz, max_force = action
         target_pose = self.get_pos()+np.array(dx, dy, dz)
-        self.go_to_pose(target_pose, obstacles=[], attachments=[], cart_traj=True, use_policy = False, maxForce = max_force):
+        self.go_to_pose(target_pose, obstacles=[], attachments=[], cart_traj=True, use_policy = False, maxForce = max_force)
         ob = self.observe_state()
         rew = int(self.is_pipe_in_hole())
         return ob, rew, False, {}
@@ -218,33 +222,7 @@ class PegInsertEnv():
 
     def save_state(self):
         self.bullet_id = p.saveState()
-    def collect_trajs(self):
-        trajs = []
-        self.history = History()
-        shifts = np.linspace(0, 0.02, 30)
-        num_trials = 20
 
-        for n in range(num_trials):
-            print("Trial #", n)
-            rewards = []
-            for i in shifts:
-                self.restore_state()
-                self.pw.steps_taken=0
-                self.pw.shift_t_joint(i,0)
-                if i == 0:
-                    traj = self.insert()
-                else:
-                    traj = self.insert(use_policy=False)
-                rewards.append(self.is_pipe_in_hole()) 
-                trajs.append(traj)
-                self.history.paths = trajs
-            self.history.rewards.append(rewards)
-        np.save("rewards_40.npy", np.array(self.history.rewards))
-        np.save("shifts_40.npy", shifts)
-            #self.train_policy_with_trajs()
-
-    def train_policy_with_trajs(self):
-        self.policy = train_policy(self.history) 
     def close(self):
         p.disconnect()
          
@@ -256,7 +234,6 @@ class PegInsertEnv():
         self.place()
         simulate_for_duration(0.5)
         self.steps_taken += 0.5
-        self.pw.shift_t_joint(self._shift,0)
         self.save_state()
 
 
