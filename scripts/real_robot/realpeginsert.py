@@ -102,9 +102,6 @@ class Robot():
                 curr_rt = fa.get_pose()
                 scalar = 1
                 delta_ee_rt.translation *= scalar
-                #print("Delta pose", next_pos.translation - curr_rt.translation)
-                #print("Delta angle", np.array(next_pos.euler_angles) - np.array(curr_rt.euler_angles))
-                #input("OK to go to pose difference from MF?")
                 delta_ee_rt.from_frame = "franka_tool"
                 delta_ee_rt.to_frame = "franka_tool"
 
@@ -116,10 +113,13 @@ class Robot():
                 if z_pos <= in_hole:
                     print("Detected successfully in hole")
                     return 
-                #if "y" in res:
-                #    return
 
-    
+   """
+   @param bool straighten - whether the roll and pitch should be
+               forced to 0 as prior information that the object is flat
+   @param shape_class Shape \in {Circle, Square, Rectangle, etc} - type of shape the detector should look for
+   @param goal whether the detector should look for the object or goal hole
+   """
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
@@ -148,6 +148,7 @@ class Robot():
         
     """
     Goes to shape center and then grasps it 
+    @param T_tag_world RigidTransform transform from tag to world 
     """
     def grasp_shape(self,T_tag_world, shape_type, grasp_offset=0.024, 
                     monitor_execution=True, use_planner=False):
@@ -180,6 +181,10 @@ class Robot():
        self.follow_traj(path, monitor_execution=monitor_execution)
        fa.close_gripper()
 
+    """
+    Samples one point in the precondition of the model-free policy
+    Assumes only one model-free policy
+    """
     def sample_modelfree_precond_pt(self):
         ee_data = None
         for fn in os.listdir("data/"):
@@ -196,7 +201,11 @@ class Robot():
         my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.00,-0.00,0,0,0,0,0]), cov = np.cov(ee_data.T))
         return my_mvn.rvs()
 
-
+    """ 
+    Samples a point in the model-free policy condition and then goes to it
+    if use_planner is set to true, then it computes the path using the planner
+    else, it just uses linear interpolation
+    """
     def goto_modelfree_precond(self, use_planner=False):
         sample = self.sample_modelfree_precond_pt() 
         monitor_execution=True
@@ -221,7 +230,10 @@ class Robot():
             self.follow_traj(path, monitor_execution=True)
             self.follow_traj([sample], monitor_execution=True)
 
-
+    """
+    uses the model to put the shape into the corresponding hole
+    assumes the shape being inserted is a Rectangle
+    """
     def model_based_insert_shape(self, T_tool_world, monitor_execution=True):
         hole_goal = rigid_transform_to_pb_pose(T_tool_world)
         place_traj = self.pb_world.place_object(shape_class=Rectangle, visualize=True)
@@ -290,7 +302,15 @@ class Robot():
         T_tool_world.translation[-1] -= 0.02
         res = self.follow_traj([T_tool_world], cart_gain = 150, z_cart_gain = 700, rot_cart_gain=150)
         return res
-
+    """
+    Uses a GP to classify whether pt is in the region where the model is bad
+    with high probability. Retrains the model when retrain=True. 
+    
+    
+    Warning: GP Regression is slow with many points. Consider doing some form of PCA
+    on the points or only selecting some of them. 
+    
+    """
     def in_region_with_modelfailure(self,pt, retrain=True):
         if retrain:
             bad = np.load("data/bad_model_states.npy", allow_pickle=True)
@@ -306,6 +326,23 @@ class Robot():
         pred = self.gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
         return not bool(np.round(pred.item()))
 
+    """
+    Follows each pt in path with the specified gains
+    if monitor_execution is set to True, 
+    
+    if the point in the trajectory is estimated to be in a region of model failure
+    then the robot returns a string indicating expected model failure. 
+    
+    if the trajectory is likely to go work, according to the robot's estimate
+    of the region where model failure is likely, 
+    then at each discrete time step,
+    the robot checks to see if
+    1. unexpected (lack of) contact was observed 
+    2. The end-effector is where the plan expects it to be
+    3. the plan is being executed as expected
+    
+    return: a string indicating whether something unexpected was observed
+    """
     def follow_traj(self, path, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart", dt = 2):
         cart_poses = []
         if monitor_execution:
@@ -315,9 +352,7 @@ class Robot():
                 else:
                     cart_pt = pt
                 if self.in_region_with_modelfailure(cart_pt):
-                    #import ipdb; ipdb.set_trace()
                     print("expected model failure")
-                    #return "expected_model_failure"
         for pt, i in zip(path, range(len(path))):
             if traj_type == "cart":
                 new_pos = pt
@@ -341,9 +376,10 @@ class Robot():
                     fa.goto_joints(np.array(pt).tolist(), duration=dt)
             force = self.feelforce()
             model_deviation = False
-            cart_to_sigma = lambda cart: np.exp(-0.00026255*cart-4.14340759)
+            #estimate this function from fitting data by measuring curves and how much the ee
+            #deviates in free space
+            cart_to_sigma = lambda cart :-3.77758402e+01*np.exp(1.26312397e-07*cart)+ 3.77922298e+01
             sigma_cart =  cart_to_sigma(np.array([cart_gain, cart_gain, z_cart_gain]))
-            sigma_cart = 0.008
             rot_sigma = cart_to_sigma(rot_cart_gain)
             if monitor_execution:
                 try:
@@ -372,7 +408,7 @@ class Robot():
                 np.save("data/good_model_states.npy", self.good_model_states)
                 if model_deviation:
                     print("Ending MB policy due to model deviation")
-                    return("model_failure")
+                    return "model_failure"
         if monitor_execution:
             return "expected_good"
 
