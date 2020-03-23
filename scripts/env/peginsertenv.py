@@ -4,7 +4,7 @@ from agent.history import History
 from collections import deque
 import pybullet as p
 import numpy as np
-from pybullet_tools.utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
+from env.pb_utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
 class PegInsertEnv():
     def __init__(self, visualize=True, bullet=None, shift=0, start=None, goal=None):
         self.pw = PipeWorld(visualize=visualize, bullet=bullet, square = True)

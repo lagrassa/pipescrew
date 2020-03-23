@@ -1,6 +1,6 @@
 import pybullet as p
 import os
-from  pybullet_tools.utils import create_box, create_cylinder, set_point, set_pose, simulate_for_duration
+from  env.pb_utils import create_box, create_cylinder, set_point, set_pose, simulate_for_duration
 from make_pipe import make_cylinder
 
 
@@ -38,7 +38,7 @@ class PipeWorld():
     """
     table with a hollow and solid cylinder on it
     """
-    def setup_workspace(self):
+    def setup_workspace(self, square=False):
         self.floor = p.loadURDF("../../models/short_floor.urdf")
         p.changeDynamics(self.floor, -1, mass=0)
         #self.hollow = p.loadURDF("../models/hollow.urdf", (0,0,0), globalScaling=0.020)
@@ -46,26 +46,29 @@ class PipeWorld():
         sec_width =  0.008
         thick = 0.003
         angle_correction = -0.25 #not a nice hack to make the pipe look better
-        box_w = 0.01
-        puzzle_w = 0.1
+        box_w = 0.02
+        puzzle_w = 0.2
         box_h = 0.04
         if square:
             #make 4 boxes
-            clearance = 0.01
+            clearance = 0.005
             top_box_w = 0.5*(puzzle_w-box_w)-clearance
-            box_top = create_box(puzzle_w, top_box_w, box_h)
-            box_bottom = create_box(puzzle_w, top_box_w, box_h)
-            box_right = create_box(top_box_w, 2*clearance+box_w)
-            set_point(box_top, (0,0.5(puzzle_w+top_box_w)+clearance,0.5*box_h)
-            set_point(box_bottom, (0,0.5(puzzle_w+top_box_w)+clearance,0.5*box_h)
-            set_point(box_right, (0.5(puzzle_w+top_box_w)+clearance,0,0.5*box_h)
-            set_point(box_left, (0.5(puzzle_w+top_box_w)+clearance,0,0.5*box_h)
+            box_top = create_box(top_box_w, puzzle_w, box_h)
+            side_box_w= (0.5)*(puzzle_w-2*clearance-box_w)
+            box_bottom = create_box(top_box_w,puzzle_w, box_h)
+            box_right = create_box(top_box_w,side_box_w, box_h)
+            box_left = create_box(top_box_w, side_box_w, box_h)
+            set_point(box_right, (0,0.5*(side_box_w+box_w+(2*clearance)),0.5*box_h))
+            set_point(box_left, (0,-0.5*(side_box_w+box_w+(2*clearance)),0.5*box_h))
+            set_point(box_top, (0.5*(top_box_w+box_w)+clearance,0,0.5*box_h))
+            set_point(box_bottom, (-0.5*(top_box_w+box_w)-clearance,0,0.5*box_h))
             
+            self.hollow = [box_top, box_bottom, box_right, box_left]
 
         else:
             self.hollow = make_cylinder(12,sec_width,length,thick, angle_correction)
-        p.changeDynamics(self.hollow, -1, mass=0)
-        set_pose(self.hollow, ((0.0,0,0.0),(0,0.8,0.8,0)))
+            p.changeDynamics(self.hollow, -1, mass=0)
+            set_pose(self.hollow, ((0.0,0,0.0),(0,0.8,0.8,0)))
         if square:
             self.pipe = create_box(box_w,box_w, 0.1, mass=1, color=(0, 0, 1, 1))
         else:
