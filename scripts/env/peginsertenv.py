@@ -5,6 +5,7 @@ from collections import deque
 import pybullet as p
 import numpy as np
 from env.pb_utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
+import env.pb_utils as ut
 class PegInsertEnv():
     def __init__(self, visualize=True, bullet=None, shift=0, start=None, goal=None):
         self.pw = PipeWorld(visualize=visualize, bullet=bullet, square = True)
@@ -14,6 +15,7 @@ class PegInsertEnv():
         self.total_timeout = 3
         self.steps_taken = 0
         self.dt_pose = 0.1
+        self.force_feedback_type = None
         if self.pw.handonly:
             self.ee_link=-1
             self.finger_joints =(0,1)
@@ -36,33 +38,33 @@ class PegInsertEnv():
         target_point_1 = np.array(get_pose(self.pw.pipe))[0]+grasp
         grasp = np.array([0,0,0.13])
         target_point_2 = np.array(get_pose(self.pw.pipe))[0]+grasp
-        target_quat = (1,0.5,0,0) #get whatever it is by default
-        target_pose = (target_point_1, target_quat)
+        target_quat = (1,0,0,0) #get whatever it is by default
+        target_pose_1 = (target_point_1, target_quat)
         if isinstance(self.pw.hollow, list):
             obstacles = [self.pw.pipe]+self.pw.hollow
         else:
             obstacles = [self.pw.pipe, self.pw.hollow]
-        self.go_to_pose(target_pose, obstacles=obstacles)
-        target_pose = (target_point_2, target_quat)
-        self.go_to_pose(target_pose, obstacles=obstacles)
+        self.go_to_pose(target_pose_1, obstacles=obstacles, maxForce=400)
+        target_pose_2 = (target_point_2, target_quat)
+        self.go_to_pose(target_pose_2, obstacles=obstacles)
         self.pipe_attach = create_attachment(self.pw.robot, self.ee_link, self.pw.pipe)
         self.squeeze(0,width = self.default_width)
     def collision_fn(self, pt):
         return False #TODO make this actually check collision        
-    def place(self, use_policy=False):
-        grasp = np.array([0,0,0.3])
+    def center_peg(self, use_policy=False):
+        grasp = np.array([0,0,0.24])
         hollow_pt = np.mean([get_pose(obj)[0] for obj in self.pw.hollow],axis=0)
         target_point =hollow_pt+grasp
         self.hollow_pose = hollow_pt
-        target_quat = (1,0.5,0,0)
+        target_quat = (1,0,0,0)
         target_pose = (target_point, target_quat)
         lift_point = np.array(p.getLinkState(self.pw.robot, self.finger_joints[0])[0])+grasp
         traj1 = self.go_to_pose((lift_point, target_quat), obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
         traj2 = self.go_to_pose(target_pose, obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
-        return traj1+traj2
+        self.save_state()
         
     def insert(self, use_policy=False, target_force = 1):
-        target_quat = (1,0.5,0,0) #get whatever it is by default
+        target_quat = (1,0,0,0) #get whatever it is by default
         grasp = np.array([0,0,0.18])
         target_point = np.array(self.hollow_pose)[0]+grasp
         target_pose = (target_point, target_quat)
@@ -143,11 +145,15 @@ class PegInsertEnv():
     def get_pos(self): 
         return np.array(p.getBasePositionAndOrientation(self.pw.pipe)[0])
     """
-    force_type is None, binary, discrete, cont
+    force_feedback_type is None, binary, discrete, cont
     """
     def observe_state(self, force_type=None):
         if force_type == None:
             return self.get_pos()
+    def reset(self):
+        self.restore_state()
+        #might want to add some randomness to the starting pose, but let's start with totally centered
+        return self.observe_state(self.force_feedback_type)
 
     def go_to_pose(self,target_pose, obstacles=[], attachments=[], cart_traj=False, use_policy = False, maxForce = 100):
         total_traj = []
@@ -231,7 +237,7 @@ class PegInsertEnv():
         self.approach()
         self.change_grip(0.005, force=0.8) # force control this. 1 was ok
         simulate_for_duration(0.1)
-        self.place()
+        self.center_peg()
         simulate_for_duration(0.5)
         self.steps_taken += 0.5
         self.save_state()
@@ -239,8 +245,7 @@ class PegInsertEnv():
 
 if __name__ == "__main__":
     pga = PegInsertEnv(visualize=True, bullet="place.bullet")
-    pga.do_setup()
-    import ipdb; ipdb.set_trace()
+    pga.reset()
     pga.step(0,0,0,50)
     #pga.insert()
     #pga.is_pipe_in_hole()
