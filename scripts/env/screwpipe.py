@@ -1,23 +1,19 @@
 from pipeworld import PipeWorld
 import time
-from agent.history import History
+from history import History
 from collections import deque
 import pybullet as p
-from gym.spaces import Box
 import numpy as np
-from env.pb_utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
-import env.pb_utils as ut
-class PegInsertEnv():
+from pybullet_tools.utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
+class PipeGraspEnv():
     def __init__(self, visualize=True, bullet=None, shift=0, start=None, goal=None):
-        self.pw = PipeWorld(visualize=visualize, bullet=bullet, square = True)
+        self.pw = PipeWorld(visualize=visualize, bullet=bullet)
         self.pipe_attach=None
         self.target_grip = 0.015
         self.default_width=0.010
-        self.total_timeout = 100
+        self.total_timeout = 3
         self.steps_taken = 0
         self.dt_pose = 0.1
-        self.force_feedback_type = None
-
         if self.pw.handonly:
             self.ee_link=-1
             self.finger_joints =(0,1)
@@ -32,15 +28,6 @@ class PegInsertEnv():
             next(joint_controller(self.pw.robot, self.joints, [ 0.    ,  0.    , -1.5708,  0.    ,  1.8675,  0.    , 0   ]))
         self._shift = shift
         self.do_setup()
-        sample_obs = self.observe_state()
-        obs_size = sample_obs.shape
-        c = 20
-        self.observation_space = Box(low=-c*np.ones(obs_size), high=c*np.ones(obs_size))
-        largest_delta = 0.1
-        max_force = 300
-        min_force = 30
-        self.action_space =Box(low=np.array([-largest_delta, -largest_delta, -largest_delta, min_force]),
-                               high=np.array([largest_delta, largest_delta, largest_delta, max_force]))
 
     def plot_path(self, path):
         pass
@@ -49,35 +36,29 @@ class PegInsertEnv():
         target_point_1 = np.array(get_pose(self.pw.pipe))[0]+grasp
         grasp = np.array([0,0,0.13])
         target_point_2 = np.array(get_pose(self.pw.pipe))[0]+grasp
-        target_quat = (1,0,0,0) #get whatever it is by default
-        target_pose_1 = (target_point_1, target_quat)
-        if isinstance(self.pw.hollow, list):
-            obstacles = [self.pw.pipe]+self.pw.hollow
-        else:
-            obstacles = [self.pw.pipe, self.pw.hollow]
-        self.go_to_pose(target_pose_1, obstacles=obstacles, maxForce=400)
-        target_pose_2 = (target_point_2, target_quat)
-        self.go_to_pose(target_pose_2, obstacles=obstacles)
+        target_quat = (1,0.5,0,0) #get whatever it is by default
+        target_pose = (target_point_1, target_quat)
+        obstacles = [self.pw.pipe, self.pw.hollow]
+        self.go_to_pose(target_pose, obstacles=obstacles)
+        target_pose = (target_point_2, target_quat)
+        self.go_to_pose(target_pose, obstacles=obstacles)
         self.pipe_attach = create_attachment(self.pw.robot, self.ee_link, self.pw.pipe)
         self.squeeze(0,width = self.default_width)
     def collision_fn(self, pt):
         return False #TODO make this actually check collision        
-    def center_peg(self, use_policy=False):
-        grasp = np.array([0,0,0.24])
-        hollow_pt = self.get_hole_point()
-        target_point =hollow_pt+grasp
-        self.hollow_pose = hollow_pt
-        target_quat = (1,0,0,0)
+    def place(self, use_policy=False):
+        grasp = np.array([0,0,0.3])
+        target_point = np.array(get_pose(self.pw.hollow))[0]+grasp
+        self.hollow_pose = get_pose(self.pw.hollow)
+        target_quat = (1,0.5,0,0)
         target_pose = (target_point, target_quat)
         lift_point = np.array(p.getLinkState(self.pw.robot, self.finger_joints[0])[0])+grasp
         traj1 = self.go_to_pose((lift_point, target_quat), obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
         traj2 = self.go_to_pose(target_pose, obstacles=[self.pw.hollow], attachments=[self.pipe_attach], cart_traj=True, use_policy=use_policy)
-        self.save_state()
-    def close(self):
-        p.disconnect()
-
+        return traj1+traj2
+        
     def insert(self, use_policy=False, target_force = 1):
-        target_quat = (1,0,0,0) #get whatever it is by default
+        target_quat = (1,0.5,0,0) #get whatever it is by default
         grasp = np.array([0,0,0.18])
         target_point = np.array(self.hollow_pose)[0]+grasp
         target_pose = (target_point, target_quat)
@@ -144,30 +125,9 @@ class PegInsertEnv():
         right = np.linalg.norm(p.getJointState(self.pw.robot,self.finger_joints[1])[2][3:])
         curr_force = (left+right)/2 
         return curr_force
-    """
-    action = (delta x, delta y, delta z, force)
-    """
-    def step(self, action):
-        dx, dy, dz, max_force = action
-        target_point = np.array(p.getBasePositionAndOrientation(self.pw.robot)[0])+np.array([dx, dy, dz])
-        target_pose = (target_point, (1,0,0,0))
-        self.go_to_pose(target_pose, obstacles=[], attachments=[], cart_traj=True, use_policy = False, maxForce = max_force)
-        ob = self.observe_state()
-        rew = int(self.is_pipe_in_hole())
-        return ob, rew, False, {}
     
     def get_pos(self): 
         return np.array(p.getBasePositionAndOrientation(self.pw.pipe)[0])
-    """
-    force_feedback_type is None, binary, discrete, cont
-    """
-    def observe_state(self):
-        if self.force_feedback_type == None:
-            return self.get_pos()
-    def reset(self):
-        self.restore_state()
-        #might want to add some randomness to the starting pose, but let's start with totally centered
-        return self.observe_state(self.force_feedback_type)
 
     def go_to_pose(self,target_pose, obstacles=[], attachments=[], cart_traj=False, use_policy = False, maxForce = 100):
         total_traj = []
@@ -222,17 +182,10 @@ class PegInsertEnv():
                 if distance < 1e-3:
                     break
         return total_traj
-    def get_hole_point(self):
-        if isinstance(self.pw.hollow,list):
-            hollow_pt = np.mean([get_pose(obj)[0] for obj in self.pw.hollow],axis=0)
-            return hollow_pt
-        else:
-            return np.array(p.getBasePositionAndOrientation(self.pw.hollow)[0])
-
     def goal_condition_met(self):
         return self.is_pipe_in_hole()
     def is_pipe_in_hole(self):
-        pose_hollow = self.get_hole_point()
+        pose_hollow, _ = p.getBasePositionAndOrientation(self.pw.hollow)
         pose_pipe, _ = p.getBasePositionAndOrientation(self.pw.pipe)
         xy_dist = np.linalg.norm(np.array(pose_pipe)[0:2]-np.array(pose_hollow)[0:2])
         z_dist = np.linalg.norm(pose_pipe[2]-pose_hollow[2])
@@ -245,12 +198,37 @@ class PegInsertEnv():
         p.restoreState(self.bullet_id)
 
     def reset(self):
-        self.steps_taken = 0
         self.restore_state()
 
     def save_state(self):
         self.bullet_id = p.saveState()
+    def collect_trajs(self):
+        trajs = []
+        self.history = History()
+        shifts = np.linspace(0, 0.02, 30)
+        num_trials = 20
 
+        for n in range(num_trials):
+            print("Trial #", n)
+            rewards = []
+            for i in shifts:
+                self.restore_state()
+                self.pw.steps_taken=0
+                self.pw.shift_t_joint(i,0)
+                if i == 0:
+                    traj = self.insert()
+                else:
+                    traj = self.insert(use_policy=False)
+                rewards.append(self.is_pipe_in_hole()) 
+                trajs.append(traj)
+                self.history.paths = trajs
+            self.history.rewards.append(rewards)
+        np.save("rewards_40.npy", np.array(self.history.rewards))
+        np.save("shifts_40.npy", shifts)
+            #self.train_policy_with_trajs()
+
+    def train_policy_with_trajs(self):
+        self.policy = train_policy(self.history) 
     def close(self):
         p.disconnect()
          
@@ -259,19 +237,17 @@ class PegInsertEnv():
         self.approach()
         self.change_grip(0.005, force=0.8) # force control this. 1 was ok
         simulate_for_duration(0.1)
-        self.center_peg()
+        self.place()
         simulate_for_duration(0.5)
         self.steps_taken += 0.5
+        self.pw.shift_t_joint(self._shift,0)
         self.save_state()
 
 
 if __name__ == "__main__":
-    pga = PegInsertEnv(visualize=True, bullet="place.bullet")
-    pga.reset()
-
-    action = [0,0,-0.05,100]
-    for i in range(2):
-        pga.step(action)
-    print("Success?", pga.is_pipe_in_hole())
-    pga.reset()
-
+    pga = PipeGraspEnv(visualize=True, bullet="place.bullet")
+    pga.do_setup()
+    import ipdb; ipdb.set_trace()
+    pga.insert()
+    pga.is_pipe_in_hole()
+#pga.insert()

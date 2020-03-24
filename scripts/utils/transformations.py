@@ -1244,14 +1244,14 @@ class Arcball(object):
     """Virtual Trackball Control.
     >>> ball = Arcball()
     >>> ball = Arcball(initial=numpy.identity(4))
-    >>> ball.place([320, 320], 320)
+    >>> ball.center_peg([320, 320], 320)
     >>> ball.down([500, 250])
     >>> ball.drag([475, 275])
     >>> R = ball.matrix()
     >>> numpy.allclose(numpy.sum(R), 3.90583455)
     True
     >>> ball = Arcball(initial=[0, 0, 0, 1])
-    >>> ball.place([320, 320], 320)
+    >>> ball.center_peg([320, 320], 320)
     >>> ball.setaxes([1,1,0], [-1, 1, 0])
     >>> ball.setconstrain(True)
     >>> ball.down([400, 200])

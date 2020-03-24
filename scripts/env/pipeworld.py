@@ -49,6 +49,7 @@ class PipeWorld():
         box_w = 0.02
         puzzle_w = 0.2
         box_h = 0.04
+        self.box_l = 0.08
         if square:
             #make 4 boxes
             clearance = 0.005
@@ -70,13 +71,14 @@ class PipeWorld():
             p.changeDynamics(self.hollow, -1, mass=0)
             set_pose(self.hollow, ((0.0,0,0.0),(0,0.8,0.8,0)))
         if square:
-            self.pipe = create_box(box_w,box_w, 0.1, mass=1, color=(0, 0, 1, 1))
+            self.pipe = create_box(box_w,box_w, self.box_l, mass=1, color=(0, 0, 1, 1))
         else:
             self.pipe = create_cylinder(0.01, 0.1, mass=1, color=(0, 0, 1, 1))
-        p.changeDynamics(self.pipe, -1, mass=0.3, lateralFriction=0.99, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
-        p.changeDynamics(self.robot, 9, lateralFriction=0.99, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
-        p.changeDynamics(self.robot, 10, lateralFriction=0.99, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
-        set_point(self.pipe, (0,0.08,0.015))
+        p.changeDynamics(self.pipe, -1, mass=0.1, lateralFriction=0.999, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
+        p.changeDynamics(self.robot, 9, lateralFriction=0.999, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
+        p.changeDynamics(self.robot, 10, lateralFriction=0.999, rollingFriction=0.99, spinningFriction=0.99, restitution=0.05)
+        set_point(self.pipe, (0,0.132,self.box_l/2.))
+
     def shift_t_joint(self, new_x, new_y):
         old_pos, old_orn = p.getBasePositionAndOrientation(self.hollow)
         set_pose(self.hollow, ((new_x,new_y,old_pos[2]),old_orn))
