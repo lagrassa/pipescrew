@@ -23,11 +23,11 @@ class PipeWorld():
     """
     def setup_robot(self):
         if not self.handonly:
-            self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/model.urdf") #fixme, point somewhere less fragile
+            self.robot = p.loadURDF("../../models/robots/model.urdf") #fixme, point somewhere less fragile
             set_point(self.robot, (-0.4,0,0.005))
             p.changeDynamics(self.robot, -1, mass=0)
         else:
-            self.robot = p.loadURDF(os.environ["HOME"]+"/ros/src/franka_ros/franka_description/robots/hand.urdf") #fixme, point somewhere less fragile
+            self.robot = p.loadURDF("../../models/robots/hand.urdf") 
             init_pos = (0,0,0.35)
             init_quat = (1,0,0,0)
             set_pose(self.robot,(init_pos, init_quat))
