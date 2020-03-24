@@ -6,6 +6,7 @@ from distutils.core import setup
 #setup_args = generate_distutils_setup
 setup(name='planorparam',
       version='2.0.0',
+      install_requires=["autolab_core", "Box2D", "Cython", "dateutil", "h5py", "imageio", "keras", "numpy", "matplotlib", "opencv_python", "PIL", "pybullet", "pygame", "skimage", "sklearn"]
       description='planorparam',
       author='Alex LaGrassa',
       author_email='lagrassa@cmu.edu',
