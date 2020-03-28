@@ -1,4 +1,4 @@
-from pipeworld import PipeWorld
+from env.pipeworld import PipeWorld
 import time
 from agent.history import History
 from collections import deque
@@ -8,15 +8,16 @@ import numpy as np
 from env.pb_utils import plan_joint_motion, joint_controller, inverse_kinematics_helper, get_pose, joint_from_name, simulate_for_duration, get_movable_joints, set_joint_positions, control_joints, Attachment, create_attachment
 import env.pb_utils as ut
 class PegInsertEnv():
-    def __init__(self, visualize=True, bullet=None, shift=0, start=None, goal=None):
+    def __init__(self, visualize=True, bullet=None, shift=0, start=None, force_feedback_type = None, goal=None):
         self.pw = PipeWorld(visualize=visualize, bullet=bullet, square = True)
         self.pipe_attach=None
         self.target_grip = 0.015
         self.default_width=0.010
         self.total_timeout = 100
         self.steps_taken = 0
+        self.horizon = 20
         self.dt_pose = 0.1
-        self.force_feedback_type = None
+        self.force_feedback_type = force_feedback_type
 
         if self.pw.handonly:
             self.ee_link=-1
@@ -34,13 +35,17 @@ class PegInsertEnv():
         self.do_setup()
         sample_obs = self.observe_state()
         obs_size = sample_obs.shape
-        c = 20
-        self.observation_space = Box(low=-c*np.ones(obs_size), high=c*np.ones(obs_size))
-        largest_delta = 0.1
+        max_x = 0.05
+        max_y = 0.04
+        min_z = 0.02
+        max_z = 0.9
+        self.observation_space = Box(low=np.array([-max_x, -max_y, min_z]), high=np.array([max_x, max_y, max_z]))
+        largest_delta = 0.05
+        z_delta = 0.1
         max_force = 300
         min_force = 30
-        self.action_space =Box(low=np.array([-largest_delta, -largest_delta, -largest_delta, min_force]),
-                               high=np.array([largest_delta, largest_delta, largest_delta, max_force]))
+        self.action_space =Box(low=np.array([-largest_delta, -largest_delta, -z_delta, min_force]),
+                               high=np.array([largest_delta, largest_delta, z_delta, max_force]))
 
     def plot_path(self, path):
         pass
@@ -60,6 +65,12 @@ class PegInsertEnv():
         self.go_to_pose(target_pose_2, obstacles=obstacles)
         self.pipe_attach = create_attachment(self.pw.robot, self.ee_link, self.pw.pipe)
         self.squeeze(0,width = self.default_width)
+    def goto_state(self, state):
+        #sets the state, or at least what can be set, which is the first part
+        pose = state[0:3]
+        self.go_to_pose((pose, (1,0,0,0)), obstacles=[], attachments=[self.pipe_attach],
+                        cart_traj=True, use_policy=False)
+
     def collision_fn(self, pt):
         return False #TODO make this actually check collision        
     def center_peg(self, use_policy=False):
@@ -160,10 +171,24 @@ class PegInsertEnv():
         return np.array(p.getBasePositionAndOrientation(self.pw.pipe)[0])
     """
     force_feedback_type is None, binary, discrete, cont
+    discrete is presence/absence and magnitude
     """
     def observe_state(self):
+        force_feedback = p.getJointState(self.pw.robot, self.finger_joints[0])[2] #should be symmetric across fingers, hence picking one
+        binary_threshold = 1.5 #arbitrary really
+        binary_force_feedback = (np.abs(force_feedback) > binary_threshold).astype(np.int32)
         if self.force_feedback_type == None:
             return self.get_pos()
+        elif self.force_feedback_type == "cont":
+            return np.hstack([self.get_pos(),force_feedback]).flatten()
+        elif self.force_feedback_type == "binary":
+            return np.hstack([self.get_pos(),binary_force_feedback]).flatten()
+        elif self.force_feedback_type == "discrete":
+            discrete_force_feedback =np.array(force_feedback).astype(np.int32)
+            return np.hstack([self.get_pos(),discrete_force_feedback]).flatten()
+        else:
+            return self.get_pos()
+
     def reset(self):
         self.restore_state()
         #might want to add some randomness to the starting pose, but let's start with totally centered
@@ -272,6 +297,7 @@ if __name__ == "__main__":
     action = [0,0,-0.05,100]
     for i in range(2):
         pga.step(action)
+    import ipdb; ipdb.set_trace()
     print("Success?", pga.is_pipe_in_hole())
     pga.reset()
 
