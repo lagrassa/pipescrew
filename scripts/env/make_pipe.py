@@ -22,7 +22,7 @@ def make_cylinder(n, side_length, height, width, CORRECTION_ANGLE=-0.29):
     mesh_w =0.05
     shape_indices = [p.createCollisionShape(p.GEOM_BOX, halfExtents = [side_length/2., height/2., width/2.]) for _ in verts]
     #shape_indices = [p.createCollisionShape(p.GEOM_MESH,fileName="../models/test.obj", meshScale=[side_length/mesh_sl, height/mesh_h, width/mesh_w]) for _ in verts]
-    shape_indices = [p.createCollisionShape(p.GEOM_MESH,fileName="../models/face8wide.obj", meshScale=[side_length/mesh_sl, height/mesh_h, width/mesh_w]) for _ in verts]
+    shape_indices = [p.createCollisionShape(p.GEOM_MESH,fileName="../../models/face8wide.obj", meshScale=[side_length/mesh_sl, height/mesh_h, width/mesh_w]) for _ in verts]
     #shape_indices = shape_indices[0:2]
 
     angle = ((n-2)*180)/n

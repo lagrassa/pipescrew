@@ -29,6 +29,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import os
+import keras.layers as kl
+import tensorflow as tf
 
 
 # reparameterization trick
@@ -51,16 +53,69 @@ def sampling(args):
     epsilon = K.random_normal(shape=(batch, dim))
     return z_mean + K.exp(0.5 * z_log_var) * epsilon
 
-def make_vae(image_size=None):
-    original_dim = image_size * image_size
-    # network parameters
-    input_shape = (original_dim,)
-    intermediate_dim = 512
-    latent_dim = 2
+def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
+    original_dim = image_size_x * image_size_y
+    output_dim = image_size_x*image_size_y*n_channels
+    # network parameters 640x360 image
+    input_shape = (image_size_x*image_size_y*n_channels,)
+    intermediate_dim = 250
+    latent_dim = 5
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=input_shape, name='encoder_input')
+    x = kl.Reshape((image_size_x, image_size_y, n_channels))(inputs)
+    x = kl.Conv2D(32,(5,5), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
+    x = kl.Conv2D(16, (3,3), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
+    #x = kl.Conv2D(16, (3,3), padding="same")(x)
+    #x = kl.MaxPooling2D()(x)
+    x = kl.GaussianNoise(0.001)(x)
+    ##x = kl.Conv2D(64,(7,7), padding="same")(x)
+    ##x = kl.Conv2D(32, (5,5), padding="same")(x)
+    ##x = kl.Conv2D(16, (5,5), padding="same")(x)
+    #x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
+    x = kl.Flatten()(x)
+    #x = kl.Dropout(0.5)(x)
+    x = Dense(2)(x)
+    x = Dense(latent_dim)(x)
+    #x = kl.Dropout(0.2)(x)
+    x = Dense(image_size_x*image_size_y)(x)
+    z_mean = Dense(latent_dim, name='z_mean')(x)
+    z_log_var = Dense(latent_dim, name='z_log_var')(x)
+    # use reparameterization trick to push the sampling out as input
+    # note that "output_shape" isn't necessary with the TensorFlow backend
+    z = Lambda(sampling, output_shape=(latent_dim,), name='z')([z_mean, z_log_var])
+    # instantiate encoder model
+    encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
+    # build decoder model
+    latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
+    x = Dense(intermediate_dim, activation='relu')(latent_inputs)
+    x = kl.Dropout(0.5)(x)
+    x = Dense(output_dim, activation='sigmoid')(x)
+    # instantiate decoder model
+    decoder = Model(latent_inputs, x, name='decoder')
+    #decoder.summary()
+
+    # instantiate VAE model
+    outputs = decoder(encoder(inputs)[2])
+    output_tensors = [z_mean, z_log_var, z]
+    vae = Model(inputs, outputs, name='vae_mlp')
+    return vae, encoder, decoder, inputs, outputs, output_tensors
+
+def make_vae(image_size=None, original_dim=None):
+    if original_dim is None:
+        original_dim = image_size * image_size
+    # network parameters
+    input_shape = (original_dim, )
+    intermediate_dim = 512
+    latent_dim = 32
+
+    # VAE model = encoder + decoder
+    # build encoder model
+    inputs = Input(shape=input_shape, name='encoder_input')
+
     x = Dense(intermediate_dim, activation='relu')(inputs)
     z_mean = Dense(latent_dim, name='z_mean')(x)
     z_log_var = Dense(latent_dim, name='z_log_var')(x)
@@ -75,22 +130,22 @@ def make_vae(image_size=None):
     outputs = Dense(original_dim, activation='sigmoid')(x)
     # instantiate decoder model
     decoder = Model(latent_inputs, outputs, name='decoder')
-    decoder.summary()
 
     # instantiate VAE model
     outputs = decoder(encoder(inputs)[2])
     output_tensors = [z_mean, z_log_var, z]
     vae = Model(inputs, outputs, name='vae_mlp')
     return vae, encoder, decoder, inputs, outputs, output_tensors
-
-def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epochs = 50):
-    x_train = training_data[:n_train, :]
-    x_test = training_data[n_train:, :]
+def train_vae(vae, training_data, validation_split, inputs, outputs, output_tensors,n_epochs = 50):
+    x_train = training_data
     x_train = x_train.astype('float32') / 255
-    x_test = x_test.astype('float32') / 255
-    image_size = x_train.shape[1]
+    if len(x_train.shape) == 3:
+        image_size = x_train.shape[1]
+        original_dim = image_size * image_size
+    else:
+        original_dim = x_train.shape[1]
+
     z_mean, z_log_var, z = output_tensors
-    original_dim = image_size * image_size
     reconstruction_loss = mse(inputs, outputs)
     reconstruction_loss *= original_dim
     kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
@@ -103,11 +158,11 @@ def train_vae(vae, training_data, n_train, inputs, outputs, output_tensors,n_epo
     plot_model(vae,
                to_file='vae_mlp.png',
                show_shapes=True)
-    batch_size = 128
+    batch_size = None
     vae.fit(x_train,
             epochs=n_epochs,
-            batch_size=batch_size,
-            validation_data=(x_test, None))
+            validation_split=validation_split,
+            batch_size=batch_size)
 
 def plot_results(models,
                  data,
@@ -185,8 +240,8 @@ if __name__ == '__main__':
     input_shape = (original_dim, )
     intermediate_dim = 512
     batch_size = 128
-    latent_dim = 2
-    epochs = 50
+    latent_dim = 20
+    epochs = 100
 
     # VAE model = encoder + decoder
     # build encoder model
@@ -201,7 +256,7 @@ if __name__ == '__main__':
 
     # instantiate encoder model
     encoder = Model(inputs, [z_mean, z_log_var, z], name='encoder')
-    encoder.summary()
+    #encoder.summary()
     plot_model(encoder, to_file='vae_mlp_encoder.png', show_shapes=True)
 
     # build decoder model
@@ -211,7 +266,7 @@ if __name__ == '__main__':
 
     # instantiate decoder model
     decoder = Model(latent_inputs, outputs, name='decoder')
-    decoder.summary()
+    #decoder.summary()
     plot_model(decoder, to_file='vae_mlp_decoder.png', show_shapes=True)
 
     # instantiate VAE model
@@ -243,7 +298,7 @@ if __name__ == '__main__':
     vae_loss = K.mean(reconstruction_loss + kl_loss)
     vae.add_loss(vae_loss)
     vae.compile(optimizer='adam')
-    vae.summary()
+    #vae.summary()
     plot_model(vae,
                to_file='vae_mlp.png',
                show_shapes=True)

@@ -427,3 +427,4 @@ def pad_and_add_paths(paths, old_path_history):
         combined_trajs[:len(old_path_history), :old_path_history.shape[1]] = old_path_history
         combined_trajs[len(paths):, :new_trajs.shape[1]] = new_trajs
         return combined_trajs
+

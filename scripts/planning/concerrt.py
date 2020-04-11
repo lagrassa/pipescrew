@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.stats import multivariate_normal
 from agent.belief import Belief, Particle
+from planning.actions import *
+from agent.belief import mala_distance
 np.random.seed(17)
 
 """
@@ -73,7 +75,9 @@ class Tree:
             for b_dprime in b_dprimes:
                 if in_goal_belief(b_dprime, b_goal):
                     b_dprimes_that_worked.append(b_dprime)
+                    b_dprime.visualize(goal=b_goal)
                     b_dprime.connected = True
+                    b_dprime.action = NullAction(b_goal.mean(), b_dprime)
                     #print("somethings in the goal belief")
         return b_dprimes_that_worked, b_dfailures
 
@@ -106,8 +110,11 @@ class Tree:
                 if child.connected == return_connected:
                     nodes.append(child)
         return nodes
-
+    """
+    Also does validation. parents with children need actions to get to them
+    """
     def update_tree(self):
+        assert(self.data.action is not None)
         for child in self.children:
             if isinstance(child, Tree):
                 child.update_tree()
@@ -127,6 +134,10 @@ class Tree:
             b_contingencies = belief_partitioning(b_prime)
             for belief in b_contingencies:
                 self.add_belief(b_near, belief)
+                try:
+                    self.display()
+                except:
+                    import ipdb; ipdb.set_trace()
                 unconnected_partitions += self.goal_connect(b_connected)[1]
         new_tree = self.update_tree()
         return new_tree, unconnected_partitions
@@ -135,7 +146,33 @@ class Tree:
 class Policy:
     def __init__(self, tree):
         self.tree = tree
-
+    """
+    List of actions needed to get to the goal
+    Assumes starts at the root
+    """
+    def get_best_actions(self, init_belief, bg):
+        curr_node = self.tree #TODO assert these are close to each other
+        actions = [curr_node.data.get_action()]
+        should_contacts = [curr_node.data.high_prob_collision(curr_node.data)]
+        def child_is_connected(node):
+            return ((isinstance(node, Belief) and node.connected)
+                                            or (isinstance(node, Tree) and node.data.connected))
+        def n_particles(node):
+            if isinstance(node, Belief):
+                return len(node.particles)
+            else:
+                return len(node.data.particles)
+        while True:
+            most_likely_child = np.argmax([n_particles(node) for node in curr_node.children if child_is_connected(node) ])
+            child = curr_node.children[most_likely_child]
+            if isinstance(child, Belief) and in_goal_belief(child, bg): #we've reached a leaf node
+                return actions
+            actions.append(child.data.action)
+            if child.data.high_prob_collision(curr_node.data):
+                should_contacts.append(True)
+            else:
+                should_contacts.append(False)
+            curr_node = child
     """
     Given a belief state returns an action
     estimates which state we are in and then returns the appropriate action
@@ -149,7 +186,7 @@ class Policy:
         if most_likely_action is None:
             print("Action is Nonetype")
         if check_contact:
-            contact = most_likely_current_tree.data.high_probability_collision(most_likely_current_tree.data.parent):
+            contact = most_likely_current_tree.data.high_probability_collision(most_likely_current_tree.data.parent)
             return most_likely_action, contact
         else:
             return most_likely_action
@@ -190,16 +227,18 @@ class Policy:
         self.tree = tree
 
 def construct_tree(subtree, G, parent_name):
-
     for child in subtree.children:
         if isinstance(child, Belief):
             color = "green" if child.connected else "red"
-            G.add_node(make_node_name(child), color = color)
+            shape = "box" if child.high_prob_collision(child.parent) else "circle"
+            G.add_node(make_node_name(child), color = color, shape=shape)
+            assert(make_node_name(child) != parent_name)
             G.add_edge(parent_name, make_node_name(child))
         else:
             color = "green" if child.data.connected else "red"
             G.add_node(make_node_name(child.data), color = color)
             G.add_edge(parent_name, make_node_name(child.data))
+            assert (make_node_name(child.data) != parent_name)
             construct_tree(child, G, make_node_name(child.data))
 
 def make_node_name(belief):
@@ -210,20 +249,7 @@ q is of either type Particle or Belief comprised of Particles
 """
 
 
-def mala_distance(q, belief):
-    if isinstance(q, Belief):
-        distance = 0
-        for particle in q.particles:
-            distance += 1. / len(q.particles) * mala_distance(particle, belief)**2
-        return np.sqrt(distance)
-    elif isinstance(q, tuple):
-        q = np.array(q)
-    elif isinstance(q, Particle):
-        q = q.pose
-    diff = np.matrix(np.array(q)- belief.mean())
-    if np.linalg.det(belief.cov()) < 1e-12:
-        return np.linalg.norm(diff)
-    return np.sqrt(diff * np.linalg.inv(belief.cov()) * diff.T).item()
+
 
 
 def random_config(b_g, p_bg = 0.5):
@@ -285,14 +311,8 @@ connect, guarded, or slide.
 
 def select_action(q_rand, b_near,b_old, gamma, delta = 0.04):
     walls_endpoints_to_parts = get_walls_to_endpoints_to_parts(b_near)
-    p_in_contact = 0
-    if len(b_near.walls) > 0:
-        for part in b_near.particles:
-            p_on_wall = len([wall for wall in b_near.walls if wall in walls_endpoints_to_parts.keys() and part in walls_endpoints_to_parts[wall]])/len(b_near.walls)
-            p_in_contact += (1./len(b_near.particles))*p_on_wall
-    if p_in_contact > 0:
-        print(p_in_contact, "p in contact")
-    in_contact = p_in_contact >= 0.96
+    in_contact = b_near.high_prob_collision(b_old)
+    print(in_contact, "contact")
     if in_contact:
         return np.random.choice([Connect, Slide], p=[1-gamma, gamma])(q_rand, b_near, b_old, delta = delta)
     else:
@@ -348,185 +368,7 @@ def in_goal_belief(b_dprime, b_goal):
     all_close = True
     for q in b_dprime.particles:
         distance = mala_distance(q, b_goal)
-        if distance > 1:
+        if distance > 0.2:
             all_close = False
+
     return all_close
-"""
-Moves a particle with an amount of Gaussian noise 
-"""
-
-
-"""
-Find contacts and update them
-"""
-def update_particle_status(belief, old_belief):
-    collision_walls_to_parts = belief.find_collisions(old_belief)
-    for part in belief.particles:
-        walls_in_contact = [belief.walls[i] for i in collision_walls_to_parts.keys()
-                            if part in collision_walls_to_parts[i]]
-        if len(walls_in_contact) > 0:
-            for wall in walls_in_contact:
-                part.contacts.append((None, wall))
-"""
-endpoints of most commonly interacted with surface
-"""
-def most_common_surface(belief):
-    #select surface to move on
-    wall_endpoints_to_parts = get_walls_to_endpoints_to_parts(belief)
-    best_ee = max(wall_endpoints_to_parts.keys(), key=lambda x: len(wall_endpoints_to_parts[x]))
-    return best_ee
-
-def get_walls_to_endpoints_to_parts(belief):
-    wall_endpoints_to_parts = {}
-    for part in belief.particles:
-        walls = part.world_contact_surfaces()
-        for wall in walls:
-            if wall.endpoints not in wall_endpoints_to_parts.keys():
-                wall_endpoints_to_parts[wall] = [part]
-            else:
-                wall_endpoints_to_parts[wall].append(part)
-    return wall_endpoints_to_parts
-
-
-def closest_wall_point(belief, pt):
-    dist_to_walls = [wall.dist_to(pt) for wall in belief.walls]
-    return belief.walls[np.argmin(dist_to_walls)].closest_pt(pt)
-"""
-Moves particle and updates if it's in contact with a wall. 
-"""
-def propagate_particle_to_q(part, shift=None, sigma=None, old_belief =None, belief=None):
-    if np.linalg.norm(shift) == 0:
-        return part #we're already there
-    new_part = propagate_particle(part, shift, sigma=sigma,old_belief=old_belief, belief=belief)
-    return new_part
-"""
-Propagates particle but only as far as the belief will go 
-"""
-def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None):
-    new_pose = part.pose + shift + np.random.normal(np.zeros(part.pose.shape),sigma)
-    new_part = Particle(new_pose)
-    walls_in_contact = belief.collision_with_particle(old_belief, new_part)
-    if len(walls_in_contact) > 0:
-        for wall in walls_in_contact:
-            new_part.contacts.append((None, wall))
-        stopped_pose = np.array(wall.closest_pt(part.pose))
-        new_part.pose = stopped_pose
-    return new_part
-
-def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta = 0.02):
-    shift = (dir / np.linalg.norm(dir)) * delta
-    new_part = propagate_particle(part, shift, belief=belief,old_belief = old_belief, sigma=0)
-    return new_part
-
-class Connect:
-    def __init__(self, q_rand, b_near, b_old,  sigma = 0.0001, delta = 0.05):
-        self.q_rand = q_rand
-        self.b_near = b_near
-        self.sigma = sigma
-        self.delta = delta
-        self.old_belief = b_old
-    '''
-    Moves by delta toward self.q_rand
-    '''
-    def get_control(self, state,dt, ext_force_mag):
-        q = self.q_rand
-        control, expected = get_control(q, state,dt,ext_force_mag, self.delta, self.sigma, self.old_belief)
-        return control, expected
-
-
-    def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 1:
-            if self.b_near.high_prob_collision(self.old_belief):
-                break
-            diff = self.q_rand - self.b_near.mean()
-            shift = diff / np.linalg.norm(diff) * self.delta
-            moved_particles = [propagate_particle_to_q(part, shift =shift, sigma=self.sigma,  belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
-            self.old_belief = self.b_near
-            self.b_near = Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
-            #print(self.b_near.mean(), self.q_rand)
-        return self.b_near
-
-def get_control(q, state,dt,ext_force_mag, delta, sigma, belief):
-    diff = q - state[0:2]
-    if np.linalg.norm(diff) == 0:
-        dir = np.array([0,0])
-    else:
-        dir = diff/np.linalg.norm(diff)
-    ext_force = -dir*ext_force_mag #really only works for opposing force
-    control = (dir*delta-state[2:]*dt)/(dt**2) + ext_force
-    k = 1
-    d = 0.1
-    #control = k*(self.q_rand-state[:2])+d*(0-state[2:])-ext_force
-    expected_next_mu = state[0:2]+(control-ext_force)*dt**2+state[2:]*dt
-    colliding_walls = belief.collision_with_particle(belief.parent, expected_next_mu)
-    if len(colliding_walls) == 0:
-        expected_next = multivariate_normal(mean = expected_next_mu, cov = sigma**2)
-    else:
-        collide_pt = colliding_walls[0].closest_pt(state[0:2], dir=dir)
-        expected_next = multivariate_normal(mean = collide_pt, cov = sigma**2)
-    return control, expected_next
-
-class Guarded:
-    def __init__(self, q_rand, b_near, b_old, sigma = 0.0001, delta = 0.05):
-        self.q_rand = q_rand
-        self.b_near = b_near
-        self.sigma = sigma
-        self.old_belief = b_old
-        self.delta = delta
-    """
-    Moves to wall closest to q_rand until achieves contact, should be identical to connect unless a collision is detected. 
-    then it turns into a contact. 
-    """
-
-    def motion_model(self):
-        while(mala_distance(self.q_rand, self.b_near)) > 1 and not self.b_near.high_prob_collision(self.old_belief, p = 0.9):
-            closest_wall_pt = closest_wall_point(self.b_near, self.q_rand)
-            diff = closest_wall_pt - self.b_near.mean()
-            shift = diff / np.linalg.norm(diff) * self.delta
-            moved_particles = [propagate_particle_to_q(part, shift=shift, sigma=self.sigma, belief = self.b_near, old_belief = self.old_belief) for part in self.b_near.particles]
-            self.b_near =  Belief(particles = moved_particles, siblings = [], walls = self.b_near.walls, parent=self.b_near)
-        return self.b_near
-
-    def get_control(self, state,dt, ext_force_mag):
-        q = self.q_rand
-        control, expected = get_control(q, state,dt,ext_force_mag, self.delta, self.sigma, self.old_belief)
-        return control, expected
-
-
-class Slide:
-    def __init__(self, q_rand, b_near, b_old, sigma=0.01, delta = 0.02):
-        self.q_rand = q_rand
-        self.b_near = b_near
-        self.sigma = sigma
-        self.delta = delta
-        self.old_belief= b_old
-
-    '''only valid along one contact surface really
-     so pick the one the majority of particles are in'''
-    def motion_model(self):
-        best_ees = np.array(most_common_surface(self.b_near).endpoints)
-        forward_dir = best_ees[0]-best_ees[1]
-        wall_i_to_particles = self.b_near.find_collisions(self.old_belief) #wall majority of particles are in contact with
-        old_wall = self.b_near.walls[max(wall_i_to_particles.keys(), key = lambda x: len(wall_i_to_particles[x]))]
-        #direction along best_ee to q
-        while(mala_distance(self.q_rand, self.b_near)) > 2 or self.b_near.high_prob_collision(self.old_belief, wall = old_wall):
-            forward_particles = [propagate_particle_by_dir(part, forward_dir, belief = self.b_near, old_belief = self.old_belief, delta = self.delta) for part in self.b_near.particles]
-            backward_particles = [propagate_particle_by_dir(part, -forward_dir, belief = self.b_near, old_belief = self.old_belief, delta = self.delta) for part in self.b_near.particles]
-            forward_belief = Belief(particles=forward_particles, siblings= [], walls = self.b_near.walls, parent = self.b_near)
-            backward_belief = Belief(particles=backward_particles, siblings= [], walls = self.b_near.walls, parent=self.b_near)
-            self.b_near =  min([forward_belief, backward_belief], key=lambda x: mala_distance(self.q_rand, x))
-        return self.b_near
-
-class NullAction:
-    def __init__(self,q_rand, b_near):
-        self.b_near = b_near
-        self.sigma = 0.01
-        self.delta = 0.05
-
-    def get_control(self, state,dt, ext_force_mag):
-        q = state[0:2]
-        control, expected = get_control(q, state,dt,ext_force_mag, self.delta, self.sigma, self.b_near)
-        return control, expected
-    def motion_model(self):
-        return self.b_near
-
