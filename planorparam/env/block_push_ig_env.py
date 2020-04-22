@@ -54,7 +54,10 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         """
         :return 2D array of envs and states relevant to the planner
         """
-        raise NotImplementedError
+        return self.get_block_poses()
+    def dists_to_goal(self, goal):
+        block_poses = self.get_block_poses()[:,:3]
+        return np.linalg.norm(block_poses-goal[:,:3],axis=1)
 
     def get_block_poses(self):
         box_pose_obs = np.zeros((self.n_envs, 7))
