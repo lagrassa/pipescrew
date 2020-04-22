@@ -8,17 +8,25 @@ from planning.blockpushpolicy import BlockPushPolicy
 
 def make_block_push_env():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', '-c', type=str, default='cfg/run_franka_rl_vec_env.yaml')
+    parser.add_argument('--cfg', '-c', type=str, default='cfg/franka_block_push.yaml')
     args = parser.parse_args()
     cfg = YamlConfig(args.cfg)
     vec_env = GymFrankaBlockPushEnv(cfg)
-
+    vec_env.reset()
     def custom_draws(scene):
         franka = scene.get_asset('franka0')
         for env_ptr in scene.env_ptrs:
             ee_transform = franka.get_ee_transform(env_ptr, 'franka0')
             draw_transforms(scene.gym, scene.viewer, [env_ptr], [ee_transform])
     return vec_env, custom_draws
+
+def test_delta_pose():
+    vec_env, custom_draws = make_block_push_env()
+    block_goal = vec_env.get_delta_goal(-0.1)
+    import time
+    for i in range(100):
+        vec_env.render(custom_draws=custom_draws)
+        time.sleep(0.1)
 
 
 def test_delta_controller():
@@ -73,3 +81,6 @@ def test_anomaly():
     deviations = policy.monitored_execution(vec_env, states, actions)
     assert(len(deviations) > 0)
     #plot points where there was an anomaly
+
+#test_delta_controller()
+test_delta_pose()

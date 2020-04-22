@@ -34,6 +34,13 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                   rb_props=default_color,
                                   asset_options=cfg['boardpiece']['asset_options']
                                   )
+        visual_block_color = default_color.copy()
+        visual_block_color['color'] = (1,0.1,0.7)
+        self._visual_block = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['block']['dims'],
+                                         shape_props=cfg['block']['shape_props'],
+                                         rb_props=visual_block_color,
+                                         asset_options=cfg['block']['asset_options']
+                                         )
 
         #add 3 boards
         self._board_name = "board1"
@@ -47,11 +54,32 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         :return 2D array of envs and states relevant to the planner
         """
         raise NotImplementedError
+
+    def get_block_poses(self):
+        box_pose_obs = np.zeros((self.n_envs, 7))
+        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+            ah = self._scene.ah_map[env_index][self._block_name]
+
+            block_transform = self._block.get_rb_transforms(env_ptr, ah)[0]
+            box_pose_obs[env_index, :] = transform_to_np(block_transform, format='wxyz')
+        return box_pose_obs
+
     def get_delta_goal(self, delta_x):
         """
         goal state of block that's a delta
         """
-        raise NotImplementedError
+        box_pose_obs= self.get_block_poses()
+        delta_goal = box_pose_obs.copy()
+        delta_goal[:,2] += delta_x
+        self._visual_block_name = "visualblock0"
+        self._scene.add_asset(self._visual_block_name, self._visual_block, gymapi.Transform(), collision_filter = -1)
+        i = 0
+        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+            ah = self._scene.ah_map[env_index][self._visual_block_name]
+            goal_pose = gymapi.Transform(p=np_to_vec3(delta_goal[i,:]))
+            self._block.set_rb_transforms(env_ptr, ah, [goal_pose])
+            i+=1
+        return delta_goal
 
     def get_dists_to_goal(self):
         raise NotImplementedError
@@ -105,13 +133,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
     def _compute_obs(self, all_actions):
         all_obs = super()._compute_obs(all_actions)
-        box_pose_obs = np.zeros((self.n_envs, 7))
-
-        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
-            ah = self._scene.ah_map[env_index][self._block_name]
-
-            block_transform = self._block.get_rb_transforms(env_ptr, ah)[0]
-            box_pose_obs[env_index, :] = transform_to_np(block_transform, format='wxyz')
+        box_pose_obs = self.get_block_poses()
 
         all_obs = np.c_[all_obs, box_pose_obs]
         return all_obs
