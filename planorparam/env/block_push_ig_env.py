@@ -45,9 +45,10 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         #add 3 boards
         self._board_name = "board1"
         self._board2_name = "board2"
-        self._scene.add_asset(self._board_name, self._board, gymapi.Transform())
-        self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform())
-        self._scene.add_asset(self._block_name, self._block, gymapi.Transform())
+        self._scene.add_asset(self._board_name, self._board, gymapi.Transform(), collision_filter = 1)
+        self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform(), collision_filter = 1)
+        self._scene.add_asset(self._block_name, self._block, gymapi.Transform(), collision_filter=1)
+
 
     def get_states(self):
         """
@@ -64,26 +65,30 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             box_pose_obs[env_index, :] = transform_to_np(block_transform, format='wxyz')
         return box_pose_obs
 
-    def get_delta_goal(self, delta_x):
+    def get_delta_goal(self, delta_x, visualize=False):
         """
         goal state of block that's a delta
         """
         box_pose_obs= self.get_block_poses()
         delta_goal = box_pose_obs.copy()
         delta_goal[:,2] += delta_x
-        self._visual_block_name = "visualblock0"
-        self._scene.add_asset(self._visual_block_name, self._visual_block, gymapi.Transform(), collision_filter = -1)
-        i = 0
-        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
-            ah = self._scene.ah_map[env_index][self._visual_block_name]
-            goal_pose = gymapi.Transform(p=np_to_vec3(delta_goal[i,:]))
-            self._block.set_rb_transforms(env_ptr, ah, [goal_pose])
-            i+=1
+        if visualize:
+            self._visual_block_name = "visualblock0"
+            self._scene.add_asset(self._visual_block_name, self._visual_block, gymapi.Transform(), collision_filter =1 )
+            i = 0
+            for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+                ah = self._scene.ah_map[env_index][self._visual_block_name]
+                goal_pose = gymapi.Transform(p=np_to_vec3(delta_goal[i,:]))
+                self._visual_block.set_rb_transforms(env_ptr, ah, [goal_pose])
+                i+=1
         return delta_goal
 
     def get_dists_to_goal(self):
         raise NotImplementedError
     def _reset(self, env_idxs):
+        self._pre_grasp_transforms = []
+        self._grasp_transforms = []
+        self._init_ee_transforms = []
         super()._reset(env_idxs)
         for env_idx in env_idxs:
             env_ptr = self._scene.env_ptrs[env_idx]
