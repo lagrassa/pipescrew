@@ -45,16 +45,15 @@ def test_short_goal():
     """
     vec_env, custom_draws = make_block_push_env()
     policy = BlockPushPolicy()
-    block_goal = vec_env.get_delta_goal(-0.1, visualize=True)
+    block_goal = vec_env.get_delta_goal(-0.5, visualize=False)
     policy.go_to_push_start(vec_env)
     [(vec_env._scene.step(), vec_env.render(custom_draws=custom_draws)) for i in range(50)]
     policy.go_to_block(vec_env)
     [(vec_env._scene.step(), vec_env.render(custom_draws=custom_draws)) for i in range(50)]
     starts = vec_env.get_states()
-    _, actions = policy.plan(starts, block_goal, horizon=2)
+    _, actions = policy.plan(starts, block_goal, horizon=400)
     for t in range(actions.shape[-1]):
-        [vec_env.step(actions[:,:,t]) for i in range(30)]
-    vec_env.render(custom_draws=custom_draws)
+        [(vec_env.step(actions[:,:,t]), vec_env.render(custom_draws=custom_draws)) for i in range(1)]
     dists = vec_env.dists_to_goal(block_goal)
     tol = 0.01
     if not ((np.abs(dists) < tol).all()):

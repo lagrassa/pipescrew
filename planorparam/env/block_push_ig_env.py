@@ -45,9 +45,9 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         #add 3 boards
         self._board_name = "board1"
         self._board2_name = "board2"
-        self._scene.add_asset(self._board_name, self._board, gymapi.Transform(), collision_filter = 1)
-        self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform(), collision_filter = 1)
-        self._scene.add_asset(self._block_name, self._block, gymapi.Transform(), collision_filter=1)
+        self._scene.add_asset(self._board_name, self._board, gymapi.Transform())
+        self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform())
+        self._scene.add_asset(self._block_name, self._block, gymapi.Transform())
 
 
     def get_states(self):
@@ -77,7 +77,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         delta_goal[:,2] += delta_x
         if visualize:
             self._visual_block_name = "visualblock0"
-            self._scene.add_asset(self._visual_block_name, self._visual_block, gymapi.Transform(), collision_filter =1 )
+            self._scene.add_asset(self._visual_block_name, self._visual_block, gymapi.Transform() )
             i = 0
             for env_index, env_ptr in enumerate(self._scene.env_ptrs):
                 ah = self._scene.ah_map[env_index][self._visual_block_name]
