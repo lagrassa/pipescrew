@@ -1,6 +1,7 @@
 from carbongym import gymapi
 from carbongym_utils.math_utils import RigidTransform_to_transform, transform_to_RigidTransform
 import numpy as np
+import matplotlib.pyplot as plt
 from autolab_core import RigidTransform
 class BlockPushPolicy():
     def __init__(self):
@@ -22,19 +23,37 @@ class BlockPushPolicy():
             actions[:, 3:, t] = np.array([0, 0, 0, 1, stiffness]).reshape(actions[:, 3:, t].shape)
             actions[:,:3,t] = (states[:,:3,t+1]-states[:,:3, t])
         return states, actions
-
-    def monitored_execution(self, vec_env, states, action, tol = 0.01):
+    """
+    tol: percentage error that's OK relative to the magnitude of the motion
+    """
+    def monitored_execution(self, vec_env, states, action, custom_draws, tol = 0.01, plot_deviations=False):
         """
         :param states, actions states and high level actions to execute
         :return list of states where the agent deviated, amount of each deviation
         """
-        deviations = np.zeros(states.shape[0], 1)
+        deviations = np.zeros((states.shape[0], states.shape[1], states.shape[-1]-1))
+        actual_states = []
+        deviated_states = []
         for t in range(states.shape[-1]-1):
-            next_state = vec_env.step(action[:,:,t])
+            vec_env.step(action[:,:,t])
+            vec_env.render(custom_draws=custom_draws)
+            next_state = vec_env.get_states()
+            actual_states.append(next_state.T)
             expected_state = states[:,:,t+1]
-            new_deviations = np.linalg.norm(next_state-expected_state, axis=1)
-            deviations = np.hstack([deviations, new_deviations])
-        return deviations
+            new_deviations = np.linalg.norm(next_state-expected_state, axis=0)
+            deviations[:,:,t] = new_deviations
+            step_distances = np.linalg.norm(states[:,:,t+1]-states[:,:,t], axis=0)
+            for env_id in range(states.shape[0]): #TODO vectorize
+                if (np.linalg.norm(new_deviations[env_id])/step_distances[env_id]) > tol:
+                    deviated_states.append(states[env_id,:,t])
+        actual_states = np.hstack(actual_states)
+        deviated_states = np.hstack(deviated_states)
+        if plot_deviations:
+            plt.plot(states[0,2,1:], label="expected z")
+            plt.plot(actual_states[2,:], label = "actual z")
+            plt.legend()
+            plt.show()
+        return deviations, deviated_states
 
     def go_to_push_start(self, vec_env, z_offset=0.09):
         for env_index, env_ptr in enumerate(vec_env._scene.env_ptrs):
@@ -59,16 +78,17 @@ class BlockPushPolicy():
         #for i in range(50):
         #    vec_env.step([0.1,0.1,0.1,0,0,0,1])
     def go_to_block(self, vec_env):
+        eps = 0.01
         for env_index, env_ptr in enumerate(vec_env._scene.env_ptrs):
             block_ah = vec_env._scene.ah_map[env_index][vec_env._block_name]
             block_transform = vec_env._block.get_rb_transforms(env_ptr, block_ah)[0]
             ee_transform = vec_env._franka.get_ee_transform(env_ptr, vec_env._franka_name)
             grasp_transform = gymapi.Transform(p=block_transform.p, r=ee_transform.r)
             pre_grasp_transfrom = gymapi.Transform(p=grasp_transform.p, r=grasp_transform.r)
-            pre_grasp_transfrom.p.z += vec_env._cfg['block']['dims']['width']/2.
+            pre_grasp_transfrom.p.z += vec_env._cfg['block']['dims']['width']/2. -eps
 
             pre_grasp_transfrom.p.y -=0.01
-            stiffness = 50
+            stiffness = 20
             vec_env._franka.set_attractor_props(env_index, env_ptr, vec_env._franka_name,
                                                 {
                                                     'stiffness': stiffness,
