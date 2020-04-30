@@ -77,7 +77,7 @@ block:
         height: 0.07
         depth: 0.07
     shape_props:
-        friction: 0.1
+        friction: 0.00000000001
         rolling_friction: 0.01
         torsion_friction: 0.01
         thickness: 5e-3
@@ -96,7 +96,7 @@ boardpiece:
         torsion_friction: 0.01
         thickness: 2e-3
     rb_props: 
-        color: [0.5,0.8, 0]
+        color: [0.0,0.0, 0.7]
     asset_options:
           density: 200
           fix_base_link: True

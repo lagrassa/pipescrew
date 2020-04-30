@@ -1,4 +1,5 @@
 from carbongym import gymapi
+from sklearn.exceptions import  NotFittedError
 from carbongym_utils.math_utils import RigidTransform_to_transform, transform_to_RigidTransform
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ class BlockPushPolicy():
     def __init__(self):
         self.manual_transition_model  = BlockPushSimpleTransitionModel()
         self.learned_transition_model = LearnedTransitionModel()
+        self.tolerance = 0.01 #in cm
         self.model_selector = ModelSelector()
         self.model_selector.add(self.manual_transition_model, model_type = "manual")
         self.model_selector.add(self.learned_transition_model, model_type = "GP")
@@ -21,7 +23,10 @@ class BlockPushPolicy():
     """
 
     def choose_transition_model(self, state, action):
-        return self.model_selector.select_model()
+        try:
+            return self.model_selector.select_model(state, action, self.tolerance)
+        except NotFittedError:
+            return self.manual_transition_model
 
     def sample_actions(self, state, goal, delta = 0.05):
         stiffness = 100
@@ -30,32 +35,39 @@ class BlockPushPolicy():
         else:
             dir = (goal[:3] - state[:3]) / (np.linalg.norm(goal[:3] - state[:3]))
         pos_action = delta*dir
-        rest_of_actions = np.multiply(np.ones((state.shape[0], 5)), np.array([1,0,0,0,stiffness]).T )
+        rest_of_actions = np.multiply(np.ones((state.shape[0], 5)), np.array([0,0,0,1,stiffness]).T )
         return np.hstack([pos_action, rest_of_actions])
     """
     Planner that uses DFS; nothing fancy
     """
-    def plan(self, start, goal,  horizon = 5):
+    def plan(self, start, goal,  delta = 0.001, horizon = 50):
         states = None
         action_shape = (8,)
         actions = None
         current_state = start.copy()
-        tol = 0.02
+        goal_tol = 0.005
         model_per_t = []
-        while np.linalg.norm(current_state - goal) > tol:
+        i = 0
+        while np.max(np.linalg.norm(current_state[:,:3] - goal[:,:3], axis=0)) > goal_tol:
+            #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
             #if in learned region, use learned one, else use normal one
             #we never reject actions rn, until we use a real planner
-            action = self.sample_actions(current_state, goal)
+            action = self.sample_actions(current_state, goal, delta = delta)
             model = self.choose_transition_model(current_state, action)
             model_per_t.append(model)
             next_state = model.predict(current_state, action)
+            current_state = next_state.copy()
+            action = action.reshape((1,) + action.shape)
+            next_state = next_state.reshape((1,) + next_state.shape)
             if actions is None:
                 actions = action
-                states = next_state
+                states =  next_state
             else:
-                states = np.concatenate([states, next_state],axis=-1)
-                actions = np.concatenate([actions, action],axis=-1)
-
+                states = np.hstack([states, next_state])
+                actions = np.hstack([actions, action])
+            i +=1
+        states = states.transpose((0,2,1))
+        actions= actions.transpose((0,2,1))
         return states, actions, model_per_t
     """
     tol: percentage error that's OK relative to the magnitude of the motion

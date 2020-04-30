@@ -54,7 +54,7 @@ def test_short_goal():
     block_goal = vec_env.get_delta_goal(-0.08, visualize=False)
     policy = move_robot_to_start(vec_env, custom_draws)
     starts = vec_env.get_states()
-    _, actions, _ = policy.plan(starts, block_goal, horizon=20)
+    _, actions, _ = policy.plan(starts, block_goal, delta = 0.00005, horizon=40)
     for t in range(actions.shape[-1]):
         [(vec_env.step(actions[:,:,t]), vec_env.render(custom_draws=custom_draws)) for i in range(1)]
     dists = vec_env.dists_to_goal(block_goal)

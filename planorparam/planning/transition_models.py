@@ -6,7 +6,9 @@ class BlockPushSimpleTransitionModel():
         pass
 
     def predict(self, state, action):
-        return state+action[:,:-1] #assumes it always works, no accounting for friction
+        next_state = state.copy()
+        next_state[:,:3] = next_state[:,:3]+action[:,:3]
+        return next_state #ignore stiffness
 
 class LearnedTransitionModel():
     def __init__(self):
