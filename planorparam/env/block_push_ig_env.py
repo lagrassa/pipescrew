@@ -18,19 +18,20 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                             asset_options=cfg['block']['asset_options']
                             )
         self._block_name = 'block0'
-        slippery = 0.1
-        default_board_shape_props = cfg['boardpiece']['shape_props']
+        rough_coef = 0.17
+        self.dt = cfg['scene']['gym']['dt']
         self._board = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['boardpiece']['dims'],
                                   shape_props=cfg['boardpiece']['shape_props'],
                                   rb_props=cfg['boardpiece']['rb_props'],
                                   asset_options=cfg['boardpiece']['asset_options']
                                   )
-        default_board_shape_props["friction"] = slippery
+        default_board_shape_props = cfg['boardpiece']['shape_props'].copy()
+        default_board_shape_props["friction"] = rough_coef
         default_color = cfg['boardpiece']['rb_props'].copy()
-        default_color['color'] = (0,0,0.7)
+        default_color['color'] = (0.5,0.8,0)
         print(cfg['block']['dims'])
         self._board2 = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['boardpiece']['dims'],
-                                  shape_props=cfg['boardpiece']['shape_props'],
+                                  shape_props=default_board_shape_props,
                                   rb_props=default_color,
                                   asset_options=cfg['boardpiece']['asset_options']
                                   )
@@ -102,7 +103,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             block_pose = gymapi.Transform(
                 p=np_to_vec3(np.array([
                     0.5,
-                    self._cfg['table']['dims']['height'] + self._cfg['block']['dims']['height'] / 2 + self._cfg['boardpiece']['dims']['height'] / 2+ 0.001,
+                    self._cfg['table']['dims']['height'] + self._cfg['block']['dims']['height'] / 2 + self._cfg['boardpiece']['dims']['height'] / 2+ 0.01,
                     0.25]))
                 )
             board_pose = gymapi.Transform(
