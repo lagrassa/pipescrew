@@ -11,7 +11,7 @@ class ModelSelector():
     def add(self, model, model_type="manual"):
         if model_type == "manual":
             self.manual_models.append(model)
-            self.manual_model_classifiers = ManualModelClassifier()
+            self.manual_model_classifiers.append(ManualModelClassifier())
         else:
             self.learned_models.append(model)
     """
@@ -25,19 +25,21 @@ class ModelSelector():
         raise ValueError("Could not find input_model", input_model)
 
 
-    def select_model(self, state, action, tol):
+    def select_model(self, state, action, tol, check_learned_model = False):
         for model, classifier in zip(self.manual_models, self.manual_model_classifiers):
-            if classifier.predict(state, action) < tol: #no action for now
+            if classifier.predict(state.reshape(1,-1)) < tol: #no action for now
                 return model
+        if not check_learned_model:
+            return self.learned_models[0]
         for learned_model in self.learned_models:
-            if learned_model.predict(state)[1] < tol: #no action for now
+            if learned_model.predict(state, action)[1] < tol: #no action for now
                 return learned_model
-        return learned_model[0] #best learned model we have; our only one.
+        return self.learned_models[0] #best learned model we have; our only one.
 
 class ManualModelClassifier():
     def __init__(self, params_file=None):
         if params_file is None:
-            n_estimators = [int(x) for x in np.linspace(start=200, stop=2000, num=10)]
+            n_estimators = [int(x) for x in np.linspace(start=20, stop=1000, num=10)]
             # Number of features to consider at every split
             max_features = ['auto', 'sqrt']
             # Maximum number of levels in tree
@@ -56,14 +58,18 @@ class ManualModelClassifier():
                            'min_samples_split': min_samples_split,
                            'min_samples_leaf': min_samples_leaf,
                            'bootstrap': bootstrap}
-            self.rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=70, cv=3, verbose=1,
+            self.rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=30, cv=3, verbose=1,
                                            random_state=42, n_jobs=12)  # Fit the random search model
 
     def train(self, states, errors, params_file = None):
         self.rf_random.fit(states, errors)
+        pred_states = self.rf_random.predict(states)
+        print(np.mean(pred_states-errors), "mean errors")
     """
     :param predicts the amount of error
     """
     def predict(self, states):
-        self.rf_random.predict(states)
+        pred = self.rf_random.predict(states)
+        print("prediction", pred)
+        return pred
 

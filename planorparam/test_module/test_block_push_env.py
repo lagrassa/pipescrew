@@ -85,13 +85,17 @@ def test_model_selection():
     lm = LearnedTransitionModel()
     model_selector.add(tm)
     model_selector.add(lm, model_type="learned")
-    N=10
-    states = np.random.uniform(low=-0.1, high = 0.1, size=(N,7))
+    N=5
+    good_states = np.random.uniform(low=-0.1, high = 0.1, size=(N,7))
+    bad_states = np.random.uniform(low=0.1, high = 0.2, size=(N,7))
+    states = np.vstack([good_states, bad_states])
     errors = [0.02,0.01,0,0,0,1,3,1,5,1]
     model_selector.add_history(states, errors, tm)
-    low_error_model = model_selector.select_model(states[0])
+    null_action = np.array([0,0,0,1,0,0,0,10])
+    tol = 0.5
+    low_error_model = model_selector.select_model(states[0], null_action, tol)
     assert(low_error_model == tm)
-    high_error_model = model_selector.select_model(states[8])
+    high_error_model = model_selector.select_model(states[8], null_action, tol)
     assert(high_error_model == lm)
 
 
@@ -152,4 +156,4 @@ def test_anomaly():
     assert(len(deviations) > 5)
     #plot points where there was an anomaly
 #test_go_to_start()
-test_action_sampling()
+test_model_selection()
