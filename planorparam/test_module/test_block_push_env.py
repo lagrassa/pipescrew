@@ -98,26 +98,26 @@ def test_model_selection():
     high_error_model = model_selector.select_model(states[8], null_action, tol)
     assert(high_error_model == lm)
 
-
-
     #pick one where it should pick the manual one
     # and where is should pick the learned one
 
 def test_learned_transition_model():
-    N = 40
+    N = 500
     stiffness = 100
     random_states = np.random.uniform(low = -0.1, high = 0.1, size=(N,7))
-    random_actions = np.random.uniform(low = -0.01, high = 0.01, size=(N,3))
-    actions_rest =np.dot(np.ones((random_states.shape[1], 5)), np.array([0,0,0,1,stiffness]) )
+    random_actions = np.random.uniform(low = -0.0001, high = 0.0001, size=(N,1))
+    actions_rest =np.multiply(np.ones((random_states.shape[0], 5)), np.array([1,0,0,0,stiffness]) )
 
-    random_actions = np.hstack([random_actions, actions_rest])
+    random_actions = np.hstack([np.zeros((N,2)),random_actions, actions_rest])
     tm = BlockPushSimpleTransitionModel()
-    next_states = tm(random_states, random_actions)
+    next_states = tm.predict(random_states, random_actions)
     lm = LearnedTransitionModel()
     lm.train(random_states, random_actions, next_states)
-    predicted_next_states = lm.predict(random_states, random_actions)
-    max_dist = np.max(np.abs(predicted_next_states - next_states))
-    assert(max_dist) < 0.1
+    predicted_next_states = lm.predict(random_states, random_actions)[0]
+    mean_dist = np.mean(np.abs(predicted_next_states[:,:3] - next_states[:,:3]))
+    print("mean distance", mean_dist)
+    assert(mean_dist) < 0.01
+    print("test passed")
 
 def test_learned_transition_model_real_data():
     N = 40
@@ -128,7 +128,7 @@ def test_learned_transition_model_real_data():
     lm.train(states, actions, next_states)
     predicted_next_states = lm.predict(states, actions)
     max_dist = np.max(np.abs(predicted_next_states - next_states))
-    assert(max_dist) < 0.1
+    assert(max_dist) < 0.01
 
 def test_no_anomaly():
     """
@@ -156,4 +156,4 @@ def test_anomaly():
     assert(len(deviations) > 5)
     #plot points where there was an anomaly
 #test_go_to_start()
-test_model_selection()
+test_short_goal()
