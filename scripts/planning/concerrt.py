@@ -232,13 +232,13 @@ def construct_tree(subtree, G, parent_name):
             color = "green" if child.connected else "red"
             shape = "box" if child.high_prob_collision(child.parent) else "circle"
             G.add_node(make_node_name(child), color = color, shape=shape)
-            assert(make_node_name(child) != parent_name)
+            #assert(make_node_name(child) != parent_name)
             G.add_edge(parent_name, make_node_name(child))
         else:
             color = "green" if child.data.connected else "red"
             G.add_node(make_node_name(child.data), color = color)
             G.add_edge(parent_name, make_node_name(child.data))
-            assert (make_node_name(child.data) != parent_name)
+            #assert (make_node_name(child.data) != parent_name)
             construct_tree(child, G, make_node_name(child.data))
 
 def make_node_name(belief):

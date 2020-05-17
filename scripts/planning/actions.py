@@ -60,12 +60,12 @@ def propagate_particle(part, shift, sigma=0, old_belief = None, belief=None, ski
     walls_in_contact = belief.collision_with_particle(old_belief, new_part)
     if len(walls_in_contact) > 0:
         for wall in walls_in_contact:
+            #should not be a probelm unless it literally tries to go through a wall
             if wall != skip_wall:
                 new_part.contacts.append((None, wall))
-                stopped_pose = np.array(wall.closest_pt(part.pose))
+                stopped_pose = np.array(wall.closest_pt(new_part.pose))
                 new_part.pose = stopped_pose
                 break
-
     return new_part
 
 def propagate_particle_by_dir(part, dir, belief = None, old_belief = None, delta = 0.02, skip_wall = None):
