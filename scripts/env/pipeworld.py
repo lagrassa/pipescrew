@@ -1,7 +1,7 @@
 import pybullet as p
 import os
 from  env.pb_utils import create_box, create_cylinder, set_point, set_pose, simulate_for_duration
-from make_pipe import make_cylinder
+from env.make_pipe import make_cylinder
 
 
 """purely simulated world"""
@@ -49,6 +49,7 @@ class PipeWorld():
         box_w = 0.02
         puzzle_w = 0.2
         box_h = 0.04
+        self.box_h = box_h
         self.box_l = 0.08
         if square:
             #make 4 boxes
