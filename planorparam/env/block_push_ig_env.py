@@ -4,12 +4,16 @@ from carbongym_utils.assets import GymFranka, GymBoxAsset, GymURDFAsset
 from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np
 import argparse
 from autolab_core import YamlConfig
-from gym.spaces import Box
+from gym.spaces import Box, Discrete
 from carbongym_utils.draw import draw_transforms
 from pyquaternion import Quaternion
 from carbongym_utils.rl.franka_vec_env import GymFrankaVecEnv
 class GymFrankaBlockPushEnv(GymFrankaVecEnv):
-
+    """
+    IMPORTANT ASSUMPTION:
+    if env_idx = 0, then it's the "real world" and if env_idx = 1 then its the "planning world" for many of these methods.
+    If i get around to it, I'll note which are which.
+    """
     def _fill_scene(self, cfg):
         super()._fill_scene(cfg)
         self._block = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['block']['dims'],
@@ -49,24 +53,33 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         self._scene.add_asset(self._board_name, self._board, gymapi.Transform())
         self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform())
         self._scene.add_asset(self._block_name, self._block, gymapi.Transform())
+        #default goal setting you need to
+        default_x = 0.1
+        self.get_delta_goal(default_x)
 
 
-    def get_states(self):
+    def get_states(self, env_idx =None):
         """
         :return 2D array of envs and states relevant to the planner
         """
-        return self.get_block_poses()
+        return self.get_block_poses(env_idx=env_idx)
+    def get_vels(self, env_idx = None):
+        return 0*self.get_block_poses(env_idx=env_idx) #TODO make this the actual block poses
     def dists_to_goal(self, goal):
         block_poses = self.get_block_poses()[:,:3]
         return np.linalg.norm(block_poses-goal[:,:3],axis=1)
 
-    def get_block_poses(self):
-        box_pose_obs = np.zeros((self.n_envs, 7))
+    def get_block_poses(self, env_idx = None):
+        if env_idx is None:
+            box_pose_obs = np.zeros((self.n_envs, 7))
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             ah = self._scene.ah_map[env_index][self._block_name]
-
             block_transform = self._block.get_rb_transforms(env_ptr, ah)[0]
-            box_pose_obs[env_index, :] = transform_to_np(block_transform, format='wxyz')
+            block_transform_np = transform_to_np(block_transform, format="wxyz")
+            if env_idx == env_index:
+                return block_transform_np
+            else:
+                box_pose_obs[env_index, :] = block_transform_np
         return box_pose_obs
 
     def get_delta_goal(self, delta_x, visualize=False):
@@ -85,14 +98,21 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                 goal_pose = gymapi.Transform(p=np_to_vec3(delta_goal[i,:]))
                 self._visual_block.set_rb_transforms(env_ptr, ah, [goal_pose])
                 i+=1
-        return delta_goal
+        world_idx = 0
+        self.desired_goal = delta_goal[world_idx,1:3]
+        return self.desired_goal.copy()
+
+    def set_goal(self, goal):
+        self.desired_goal = goal
 
     def get_dists_to_goal(self):
         raise NotImplementedError
-    def _reset(self, env_idxs):
+    def _reset(self, env_idxs=None):
         self._pre_grasp_transforms = []
         self._grasp_transforms = []
         self._init_ee_transforms = []
+        if env_idxs is None:
+            env_idxs = self._scene.env_ptrs
         super()._reset(env_idxs)
         for env_idx in env_idxs:
             env_ptr = self._scene.env_ptrs[env_idx]
@@ -121,7 +141,23 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._block.set_rb_transforms(env_ptr, board_ah, [board_pose])
             self._block.set_rb_transforms(env_ptr, board2_ah, [board2_pose])
 
+    def _init_action_space(self, cfg):
+        action_space = super()._init_action_space(cfg)
+        self.num_discrete_actions = 4
+        self.discrete_actions_list = [[0.1,10],[0.3,30],[0.01,10]]
+        self.discrete_actions = {}
+        i = 0
+        for discrete_action in self.discrete_actions_list:
+            self.discrete_actions[tuple(discrete_action)] = i
+
+        return Discrete(len(self.discrete_actions_list))
+
     def _init_obs_space(self, cfg):
+        self.unwrapped = self
+        self._seed = 17 #lambda x: np.random.seed(x)
+        self.seed = 17
+        self.reward_range = None
+        self.metadata = None
         obs_space = super()._init_obs_space(cfg)
 
         # add pose of block to obs_space
@@ -134,32 +170,43 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             [10] * 3 + [1] * 4
         ])
         new_obs_space = Box(limits_low, limits_high, dtype=np.float32)
-
+        self.num_features = obs_space.shape[0]
         return new_obs_space
-    def _step(self, action):
-        #todo get above from action, make a planner
-        self._franka.set_delta_ee_transform(self, env_ptr, env_index, name, tf)
+    def _apply_actions(self, action, planning_env = False):
+        if planning_env:
+            idx = 1
+        else:
+            idx = 0
+        env_ptr = self._scene.env_ptrs[idx]
+        np_action = np.array([0,0,action[0]])
+        transform = gymapi.Transform(p=np_to_vec3(np.array(np_action)));
+        stiffness = action[1]
+        self._franka.set_attractor_props(idx, env_ptr, self._franka_name,
+                                            {
+                                                'stiffness': stiffness,
+                                                'damping': 6 * np.sqrt(stiffness)
+                                            })
+        self._franka.set_delta_ee_transform(env_ptr, idx, self._franka_name, transform)
+
 
     def _compute_obs(self, all_actions):
         all_obs = super()._compute_obs(all_actions)
         box_pose_obs = self.get_block_poses()
-
         all_obs = np.c_[all_obs, box_pose_obs]
-        return all_obs
+        return {"observation":all_obs, "desired_goal":self.desired_goal, 'qpos':self.get_states(), 'qvel':self.get_vels() }
     """
     :param all_obs list of +
     
     """
-    def _compute_rews(self, all_obs, all_actions):
-        rews = []
-        des_pitch = np.pi/2
-        des_roll = np.pi/2
-        for (obs, act) in zip(all_obs, all_actions):
-            act_cost = np.linalg.norm(act)
-            yaw, pitch, roll = Quaternion(obs[-4:]).yaw_pitch_roll #difference from upright. We want roll OR pitch to be close to straight but we don't care about yaw
-            pose_cost = min((pitch-des_pitch)**2,(des_roll- roll)**2)
-            rews.append(-act_cost-pose_cost)
-        return np.array(rews)
+    def is_success(self, obj_pos, goal_pos):
+        return np.linalg.norm(obj_pos[:3]-goal_pos[:3])< 0.02
+    def extract_features(self, obs, goal):
+        return np.linalg.norm(obs[1,18:18+3]-goal[0:3])
+
+    def _compute_rews(self, obs, action):
+        act_cost = np.linalg.norm(action)
+        pose_cost = np.linalg.norm(self.desired_goal[:2]-obs['observation'][0,19:19+2])
+        return act_cost +pose_cost
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

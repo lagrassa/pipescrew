@@ -52,6 +52,7 @@ class BlockPushPolicy():
             #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
             #if in learned region, use learned one, else use normal one
             #we never reject actions rn, until we use a real planner
+            print("curr distance", np.linalg.norm(current_state - goal))
             action = self.sample_actions(current_state, goal, delta = delta)
             model = self.choose_transition_model(current_state, action)
             model_per_t.append(model)

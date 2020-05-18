@@ -138,7 +138,7 @@ def test_no_anomaly():
     block_goal = vec_env.get_delta_goal(-0.1)
     policy = move_robot_to_start(vec_env, custom_draws)
     starts = vec_env.get_states()
-    states, actions, _ = policy.plan(starts, block_goal, horizon=50)
+    states, actions, _ = policy.plan(starts, block_goal, delta = 0.001, horizon=50)
     deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 0.1, plot_deviations = True)
     assert(len(deviations) <= 2) #first 2 are tricky to get but dont really count
     print("test passed")
@@ -156,4 +156,5 @@ def test_anomaly():
     assert(len(deviations) > 5)
     #plot points where there was an anomaly
 #test_go_to_start()
-test_short_goal()
+#test_no_anomaly()
+test_learned_transition_model()
