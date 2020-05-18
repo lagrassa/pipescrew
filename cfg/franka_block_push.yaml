@@ -14,7 +14,8 @@ scene:
         shape_collision_margin: 1e-3
         contact_regularization: 1e-7
         deterministic_mode: True
-  
+env:
+    n_inter_steps: 50
 franka: 
     asset_options:
         fix_base_link: True

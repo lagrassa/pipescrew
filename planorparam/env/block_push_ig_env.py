@@ -13,9 +13,12 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
     IMPORTANT ASSUMPTION:
     if env_idx = 0, then it's the "real world" and if env_idx = 1 then its the "planning world" for many of these methods.
     If i get around to it, I'll note which are which.
+
+    Just ignore 1 and use 0
     """
     def _fill_scene(self, cfg):
         super()._fill_scene(cfg)
+        self.real_env_idx = 0
         self._block = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['block']['dims'],
                             shape_props=cfg['block']['shape_props'],
                             rb_props=cfg['block']['rb_props'],
@@ -176,7 +179,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         if planning_env:
             idx = 1
         else:
-            idx = 0
+            idx = self.real_env_idx
         env_ptr = self._scene.env_ptrs[idx]
         np_action = np.array([0,0,action[0]])
         transform = gymapi.Transform(p=np_to_vec3(np.array(np_action)));
@@ -188,25 +191,30 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                             })
         self._franka.set_delta_ee_transform(env_ptr, idx, self._franka_name, transform)
 
-
     def _compute_obs(self, all_actions):
         all_obs = super()._compute_obs(all_actions)
         box_pose_obs = self.get_block_poses()
         all_obs = np.c_[all_obs, box_pose_obs]
-        return {"observation":all_obs, "desired_goal":self.desired_goal, 'qpos':self.get_states(), 'qvel':self.get_vels() }
+        obj_pos = box_pose_obs[self.real_env_idx,1:3]
+        return {"observation":obj_pos, "desired_goal":self.desired_goal, 'qpos':self.get_states(), 'qvel':self.get_vels(), 'achieved_goal': self.is_success(obj_pos, self.desired_goal) }
     """
-    :param all_obs list of +
+    :param all_obs obj_pos and goal_pos in planning space since this is a planner specific function
     
     """
     def is_success(self, obj_pos, goal_pos):
-        return np.linalg.norm(obj_pos[:3]-goal_pos[:3])< 0.02
+        return np.linalg.norm(obj_pos-goal_pos) < 0.02
     def extract_features(self, obs, goal):
-        return np.linalg.norm(obs[1,18:18+3]-goal[0:3])
-
+        return np.linalg.norm(obs-goal[:2])
+    def _compute_dones(self, all_obs, all_actions, all_rews):
+        if self.is_success(all_obs["observation"], self.desired_goal):
+            return True
+        return False #maybe have it error if it goes too far but I dont think its important
     def _compute_rews(self, obs, action):
         act_cost = np.linalg.norm(action)
-        pose_cost = np.linalg.norm(self.desired_goal[:2]-obs['observation'][0,19:19+2])
+        pose_cost = np.linalg.norm(self.desired_goal[:2]-obs['observation'])
         return act_cost +pose_cost
+    def _compute_infos(self, all_obs, all_actions, all_rews, all_dones):
+        return {}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
