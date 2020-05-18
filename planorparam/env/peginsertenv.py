@@ -87,6 +87,12 @@ class PegInsertEnv():
     def close(self):
         p.disconnect()
 
+    def get_grasp(self):
+        #vector from robot to pipe. If this translation is added, it gives you the pipe pose
+        finger_poses = [p.getLinkState(self.pw.robot, finger) for finger in self.finger_joints]
+        middle_pose = np.mean(np.vstack(finger_poses),axis=0)
+        return self.get_pos()-middle_pose
+
     def insert(self, use_policy=False, target_force = 1):
         target_quat = (1,0,0,0) #get whatever it is by default
         grasp = np.array([0,0,0.18])
@@ -169,6 +175,14 @@ class PegInsertEnv():
     
     def get_pos(self): 
         return np.array(p.getBasePositionAndOrientation(self.pw.pipe)[0])
+    def get_qqdot(self):
+        """
+
+        :return: qqdot of the pipe
+        """
+        vel = p.getLinkState(self.pw.pipe, -1, computeLinkVelocity=1)[7]
+        return np.hstack([self.get_pos(), vel]).flatten()
+
     """
     force_feedback_type is None, binary, discrete, cont
     discrete is presence/absence and magnitude

@@ -71,7 +71,7 @@ class Belief():
 
 
     def high_prob_collision(self, old_belief, p = 0.96, wall = None):
-        wall_i_to_colliding_parts = self.find_collisions(old_belief)
+        wall_i_to_colliding_parts = self.find_collisions(old_belief, close_counts = True)
         p_collision = 0
         if len(self.walls) == 0:
             return False
@@ -92,10 +92,10 @@ class Belief():
     A collision is NOT the same as a contact. Contacts are expected and planned for
     dict mapping wall with particles
     """
-    def find_collisions(self, old_belief):
+    def find_collisions(self, old_belief, close_counts = False):
         wall_i_to_colliding_parts = {}
         for wall, i in zip(self.walls, range(len(self.walls))):
-            parts_in_collision = wall.get_particles_in_collision(self, old_belief)
+            parts_in_collision = wall.get_particles_in_collision(self, old_belief, close_counts=close_counts)
             for part in parts_in_collision:
                 if i not in wall_i_to_colliding_parts.keys():
                     wall_i_to_colliding_parts[i] = [part]
@@ -130,15 +130,16 @@ class Wall():
     coincide with the line 
     returns idxs
     """
-    def get_particles_in_collision(self, belief, old_belief):
+    def get_particles_in_collision(self, belief, old_belief, close_counts = False):
         #start integrating from the center out
-        parts_in_collision = [part for part in belief.particles if self.is_particle_in_collision(part.pose, old_belief)]
+        parts_in_collision = [part for part in belief.particles if self.is_particle_in_collision(part.pose, old_belief, close_counts = close_counts)]
         return parts_in_collision
 
-    def is_particle_in_collision(self, pt, old_belief):
-        thresh =0.03
-        if self.line.distance(pt) < thresh:
-            return 1
+    def is_particle_in_collision(self, pt, old_belief, close_counts = False):
+        if close_counts:
+            thresh =0.01
+            if self.line.distance(pt) < thresh:
+                return 1
         seg = sg.LineString([old_belief.mean(), pt])
 
         #inside_wall = bool(len(intersection(seg, self.line)))

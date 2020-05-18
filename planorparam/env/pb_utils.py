@@ -16,7 +16,7 @@ import datetime
 from collections import defaultdict, deque, namedtuple
 from itertools import product, combinations, count
 
-from transformations import quaternion_from_matrix, unit_vector
+from env.transformations import quaternion_from_matrix, unit_vector
 
 directory = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(directory, '../motion'))
