@@ -52,15 +52,20 @@ def test_short_goal():
     """
     vec_env, custom_draws = make_block_push_env()
     block_goal = vec_env.get_delta_goal(-0.08, visualize=False)
-    policy = move_robot_to_start(vec_env, custom_draws)
-    starts = vec_env.get_states()
-    _, actions, _ = policy.plan(starts, block_goal, delta = 0.00005, horizon=40)
+    #policy = move_robot_to_start(vec_env, custom_draws)
+    policy = BlockPushPolicy()
+    obs = vec_env._compute_obs(None)
+    start_state = obs["observation"]
+    _, actions, _ = policy.plan(start_state, block_goal, delta = 0.00005, horizon=40)
     for t in range(actions.shape[-1]):
-        [(vec_env.step(actions[:,:,t]), vec_env.render(custom_draws=custom_draws)) for i in range(1)]
+        [(vec_env.step(actions[:,t]), vec_env.render(custom_draws=custom_draws)) for i in range(1)]
     dists = vec_env.dists_to_goal(block_goal)
     tol = 0.01
+    print(dists, "distances")
     if not ((np.abs(dists) < tol).all()):
-        print(dists, "distances")
+        print("Test failed")
+    else:
+        print("test passed")
 
 
 def test_action_sampling():
@@ -157,4 +162,5 @@ def test_anomaly():
     #plot points where there was an anomaly
 #test_go_to_start()
 #test_no_anomaly()
-test_learned_transition_model()
+# test_learned_transition_model()
+test_short_goal()

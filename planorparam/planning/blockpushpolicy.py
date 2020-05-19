@@ -29,7 +29,9 @@ class BlockPushPolicy():
             return self.manual_transition_model
 
     def sample_actions(self, state, goal, delta = 0.05):
-        stiffness = 100
+        #Adapted for simpler action space
+        stiffness = 1000
+        return np.array([-0.02, stiffness])
         if len(state.shape) == 2:
             dir = (goal[:,:3]-state[:,:3])/(np.linalg.norm(goal[:,:3]-state[:,:3]))
         else:
@@ -45,10 +47,12 @@ class BlockPushPolicy():
         action_shape = (8,)
         actions = None
         current_state = start.copy()
-        goal_tol = 0.005
+        goal_tol = 0.01
         model_per_t = []
         i = 0
-        while np.max(np.linalg.norm(current_state[:,:3] - goal[:,:3], axis=0)) > goal_tol:
+        states = []
+        actions = []
+        while np.max(np.linalg.norm(current_state - goal, axis=0)) > goal_tol:
             #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
             #if in learned region, use learned one, else use normal one
             #we never reject actions rn, until we use a real planner
@@ -60,15 +64,13 @@ class BlockPushPolicy():
             current_state = next_state.copy()
             action = action.reshape((1,) + action.shape)
             next_state = next_state.reshape((1,) + next_state.shape)
-            if actions is None:
-                actions = action
-                states =  next_state
-            else:
-                states = np.hstack([states, next_state])
-                actions = np.hstack([actions, action])
+            actions.append(action)
+            states.append(next_state)
             i +=1
-        states = states.transpose((0,2,1))
-        actions= actions.transpose((0,2,1))
+        states = np.vstack(states)
+        actions = np.vstack(actions)
+        states = states.T
+        actions= actions.T
         return states, actions, model_per_t
     """
     tol: percentage error that's OK relative to the magnitude of the motion
@@ -131,7 +133,7 @@ class BlockPushPolicy():
             grasp_transform = gymapi.Transform(p=block_transform.p, r=ee_transform.r)
             pre_grasp_transfrom = gymapi.Transform(p=grasp_transform.p, r=grasp_transform.r)
             pre_grasp_transfrom.p.z += z_offset
-            pre_grasp_transfrom.p.y -= 0.02
+            pre_grasp_transfrom.p.y -= 0.01
             rt = transform_to_RigidTransform(pre_grasp_transfrom)
             rot_matrix = RigidTransform.y_axis_rotation(np.pi/2)
             rt.rotation = np.dot(rot_matrix, rt.rotation)

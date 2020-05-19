@@ -15,7 +15,7 @@ scene:
         contact_regularization: 1e-7
         deterministic_mode: True
 env:
-    n_inter_steps: 50
+    n_inter_steps: 100
 franka: 
     asset_options:
         fix_base_link: True
