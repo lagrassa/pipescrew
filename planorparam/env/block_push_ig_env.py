@@ -60,6 +60,27 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         default_x = 0.1
         self.get_delta_goal(default_x)
 
+    def goto_start(self, teleport=False):
+        if teleport:
+            for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+                joint_angles = np.load("data/push_joint_angles.npy")
+                ah = self._scene.ah_map[env_index][self._franka_name]
+                self._franka.set_joints(env_ptr, ah, joint_angles)
+                self._scene.render()
+
+        else:
+            from planning.blockpushpolicy import BlockPushPolicy
+            policy = BlockPushPolicy()
+            vec_env = self._scene
+            policy.go_to_push_start(self)
+            [(vec_env.step(), vec_env.render()) for i in range(100)]
+            policy.go_to_block(self)
+            [(vec_env.step(), vec_env.render()) for i in range(50)]
+            for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+                ah = self._scene.ah_map[env_index][self._franka_name]
+                if env_index == 0:
+                    joint_angles = self._franka.get_joints(env_ptr, ah)
+            np.save("data/push_joint_angles.npy", joint_angles)
 
     def get_states(self, env_idx =None):
         """
@@ -143,6 +164,8 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._block.set_rb_transforms(env_ptr, block_ah, [block_pose])
             self._block.set_rb_transforms(env_ptr, board_ah, [board_pose])
             self._block.set_rb_transforms(env_ptr, board2_ah, [board2_pose])
+        self._scene.render()
+        self.goto_start(teleport=True)
 
     def _init_action_space(self, cfg):
         action_space = super()._init_action_space(cfg)
