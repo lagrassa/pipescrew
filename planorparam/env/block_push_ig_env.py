@@ -183,7 +183,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
     def _init_action_space(self, cfg):
         action_space = super()._init_action_space(cfg)
         self.num_discrete_actions = 4
-        self.discrete_actions_list = [[-0.1,10],[-0.3,30],[-0.01,10]]
+        self.discrete_actions_list = [[-0.02,1000],[-0.02,10],[-0.02,1000]]
         self.discrete_actions = {}
         i = 0
         for discrete_action in self.discrete_actions_list:

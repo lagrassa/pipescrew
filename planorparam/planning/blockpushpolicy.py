@@ -7,11 +7,13 @@ from autolab_core import RigidTransform
 from planning.transition_models import BlockPushSimpleTransitionModel, LearnedTransitionModel
 from agent.model_selection import ModelSelector
 class BlockPushPolicy():
-    def __init__(self):
+    def __init__(self, use_history=False):
         self.manual_transition_model  = BlockPushSimpleTransitionModel()
         self.learned_transition_model = LearnedTransitionModel()
-        self.tolerance = 0.01 #in cm
-        self.model_selector = ModelSelector()
+        self.manual_transition_model_idx = 0
+        self.learned_transition_model_idx = 1
+        self.tolerance = 0.2 #in percentage of motion in cm
+        self.model_selector = ModelSelector(use_history=use_history)
         self.model_selector.add(self.manual_transition_model, model_type = "manual")
         self.model_selector.add(self.learned_transition_model, model_type = "GP")
 
@@ -48,9 +50,9 @@ class BlockPushPolicy():
         actions = None
         current_state = start.copy()
         goal_tol = 0.01
-        model_per_t = []
+        model_per_t = [] #0 for planned 1 for learned
         i = 0
-        states = []
+        states = [current_state] #next states after taking an action, including the first though.
         actions = []
         while np.max(np.linalg.norm(current_state - goal, axis=0)) > goal_tol:
             #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
@@ -59,32 +61,39 @@ class BlockPushPolicy():
             print("curr distance", np.linalg.norm(current_state - goal))
             action = self.sample_actions(current_state, goal, delta = delta)
             model = self.choose_transition_model(current_state, action)
-            model_per_t.append(model)
+            if model == self.manual_transition_model:
+                model_idx = self.manual_transition_model_idx
+            else:
+                model_idx = self.learned_transition_model_idx
+            model_per_t.append(model_idx)
             next_state = model.predict(current_state, action)
             current_state = next_state.copy()
-            action = action.reshape((1,) + action.shape)
-            next_state = next_state.reshape((1,) + next_state.shape)
+            #action = action.reshape((1,) + action.shape)
+            #next_state = next_state.reshape((1,) + next_state.shape)
             actions.append(action)
             states.append(next_state)
+            assert(len(actions) == len(states)-1 == len(model_per_t))
             i +=1
         states = np.vstack(states)
         actions = np.vstack(actions)
         states = states.T
         actions= actions.T
+        model_per_t = np.array(model_per_t)
         return states, actions, model_per_t
     """
     tol: percentage error that's OK relative to the magnitude of the motion
     """
-    def monitored_execution(self, vec_env, states, action, custom_draws,
+    def monitored_execution(self, vec_env, states, actions, custom_draws,
                             model_per_t = None,
                             tol = 0.01,
                             n_steps = 20,
+                            use_history=False,
                             plot_deviations=False):
         """
         :param states, actions states and high level actions to execute
         :return list of states where the agent deviated, amount of each deviation
         """
-        deviations = np.zeros((states.shape[0], states.shape[1], states.shape[-1]-1))
+        deviations = np.zeros(states.shape[1]-1)
         actual_states = []
         deviated_states = []
         learned_model_training_s = []
@@ -92,37 +101,39 @@ class BlockPushPolicy():
         learned_model_training_a = []
 
         for t in range(states.shape[-1]-1):
-            for i in range(n_steps):
-                vec_env.step(action[:,:,t])
-                vec_env.render(custom_draws=custom_draws)
-            next_state = vec_env.get_states()
-            actual_states.append(next_state.T)
-            expected_state = states[:,:,t+1]
+            vec_env.step(actions[:,t])
+            vec_env.render(custom_draws=custom_draws)
+            next_state = vec_env._compute_obs(None)["observation"]
+            actual_states.append(next_state)
+            expected_state = states[:,t+1]
             new_deviations = np.linalg.norm(next_state-expected_state, axis=0)
-            deviations[:,:,t] = new_deviations
-            step_distances = np.linalg.norm(states[:,:,t+1]-states[:,:,t], axis=0)
-            for env_id in range(states.shape[0]): #TODO vectorize
-                if (np.linalg.norm(new_deviations[env_id])/step_distances[env_id]) > tol:
-                    deviated_states.append(states[env_id,:,t])
-                    learned_model_training_sprime.append(actual_states[env_id])
-                    learned_model_training_a.append(actual_states[env_id])
-                    learned_model_training_s.append(states[env_id,:,t])
-        actual_states = np.hstack(actual_states)
-        deviated_states = np.hstack(deviated_states)
+            step_distances = np.linalg.norm(states[:,t+1]-states[:,t], axis=0)
+            deviations[t] = new_deviations/step_distances
+            if (deviations[t]) > tol:
+                    deviated_states.append(states[:,t])
+                    learned_model_training_sprime.append(actual_states[-1])
+                    learned_model_training_a.append(actions[:,t])
+                    learned_model_training_s.append(states[:,t])
+        actual_states = np.vstack(actual_states)
+        if len(deviated_states) > 0:
+            deviated_states = np.vstack(deviated_states)
+        timesteps = np.array(list(range(actions.shape[-1])))
         if plot_deviations:
-            plt.plot(states[0,2,1:], label="expected z")
-            plt.plot(actual_states[2,:], label = "actual z")
-            plt.plot(model_per_t == self.learned_transition_model, label="used learned model")
+            manual_timesteps = timesteps[model_per_t == self.manual_transition_model_idx]
+            learned_timesteps = timesteps[model_per_t == self.learned_transition_model_idx]
+            manual_state_preds = states[1,1:][model_per_t == self.manual_transition_model_idx]
+            learned_state_preds = states[1,1:][model_per_t == self.learned_transition_model_idx]
+            plt.scatter(manual_timesteps, manual_state_preds ,label="manually predicted z", marker = "o" )
+            plt.scatter(learned_timesteps, learned_state_preds, label="learned model predicted z" , marker="x" )
+            plt.plot(timesteps, actual_states[:,1], label = "actual z")
             plt.legend()
             plt.show()
-        manual_states = states[model_per_t]
-        manual_deviations = deviations[model_per_t]
+        manual_states = states[:,1:][:,model_per_t == self.manual_transition_model_idx]
+        manual_deviations = deviations[model_per_t == self.manual_transition_model_idx]
         self.model_selector.add_history(manual_states, manual_deviations, self.manual_transition_model)
         learned_model_training_s, learned_model_training_a,learned_model_training_sprime = [np.vstack(data) for data in [learned_model_training_s, learned_model_training_a, learned_model_training_sprime]]
-        self.learned_transition_model.train(learned_model_training_s, learned_model_training_a, learned_model_training_sprime)
-        np.save("data/states.npy", learned_model_training_s)
-        np.save("data/actions.npy", learned_model_training_a)
-        np.save("data/next_states.npy", learned_model_training_sprime)
+        self.learned_transition_model.train(learned_model_training_s, learned_model_training_a, learned_model_training_sprime, save_data = True, load_data = use_history)
+
         return deviations, deviated_states
 
     def go_to_push_start(self, vec_env, z_offset=0.09):

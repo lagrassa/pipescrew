@@ -134,6 +134,7 @@ def test_learned_transition_model_real_data():
     predicted_next_states = lm.predict(states, actions)
     max_dist = np.max(np.abs(predicted_next_states - next_states))
     assert(max_dist) < 0.01
+    print("test passed")
 
 def test_no_anomaly():
     """
@@ -141,10 +142,12 @@ def test_no_anomaly():
     """
     vec_env, custom_draws = make_block_push_env()
     block_goal = vec_env.get_delta_goal(-0.1)
-    policy = move_robot_to_start(vec_env, custom_draws)
-    starts = vec_env.get_states()
-    states, actions, _ = policy.plan(starts, block_goal, delta = 0.001, horizon=50)
-    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 0.1, plot_deviations = True)
+    #policy = move_robot_to_start(vec_env, custom_draws)
+    policy = BlockPushPolicy()
+    obs = vec_env._compute_obs(None)
+    start_state = obs["observation"]
+    states, actions, model_per_t = policy.plan(start_state, block_goal, delta = 0.001, horizon=50)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, model_per_t = model_per_t, tol = 0.25, plot_deviations = True)
     assert(len(deviations) <= 2) #first 2 are tricky to get but dont really count
     print("test passed")
 
@@ -154,13 +157,15 @@ def test_anomaly():
     """
     vec_env, custom_draws = make_block_push_env()
     block_goal = vec_env.get_delta_goal(-0.4)
-    policy = move_robot_to_start(vec_env, custom_draws)
-    starts = vec_env.get_states()
-    states, actions, _ = policy.plan(starts, block_goal, horizon=900)
-    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 0.01, plot_deviations = True)
+    policy = BlockPushPolicy(use_history=True)
+    obs = vec_env._compute_obs(None)
+    start_state = obs["observation"]
+    states, actions, model_per_t = policy.plan(start_state, block_goal, horizon=900)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 0.25, use_history=True, model_per_t=model_per_t, plot_deviations = True)
     assert(len(deviations) > 5)
     #plot points where there was an anomaly
 #test_go_to_start()
-#test_no_anomaly()
+test_anomaly()
 # test_learned_transition_model()
-test_short_goal()
+#test_learned_transition_model_real_data()
+#test_short_goal()
