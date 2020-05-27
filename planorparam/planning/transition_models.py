@@ -2,6 +2,7 @@ import GPy as gpy
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor as GPR
 from sklearn.gaussian_process.kernels import Matern
+from sklearn import preprocessing
 
 class BlockPushSimpleTransitionModel():
     def __init__(self):
@@ -25,7 +26,7 @@ class LearnedTransitionModel():
         lengthscale = (self.high_state-self.low_state) * 0.001
         self.k = gpy.kern.Matern52(self.high_state.shape[0], ARD=True, lengthscale=lengthscale)
         self.k =  Matern()
-        self.model = GPR(kernel = self.k, random_state=0, optimizer="fmin_l_bfgs_b", n_restarts_optimizer = 10, normalize_y=True) #TODO fill in with better prior
+        self.model = GPR(kernel = self.k, random_state=0, optimizer="fmin_l_bfgs_b", n_restarts_optimizer = 200, normalize_y=True) #TODO fill in with better prior
         self.states_fn = "data/states.npy"
         self.actions_fn = "data/actions.npy"
         self.next_states_fn = "data/next_states.npy"
@@ -35,8 +36,9 @@ class LearnedTransitionModel():
 
     def train_on_old_data_if_present(self):
         old_states, old_actions, old_next_states = self.load_data_if_present()
-        inputs = self.get_features(old_states, old_actions)
-        self.model.fit(inputs, old_next_states)
+        if old_states is not None:
+            inputs = self.get_features(old_states, old_actions)
+            self.model.fit(inputs, old_next_states)
 
 
     def load_data_if_present(self):
@@ -91,13 +93,30 @@ class LearnedTransitionModel():
 
 
     def get_features(self, states, actions):
-        return np.hstack([states, actions]) #all manual for now
+        actions_rescaled = actions.copy()
+        scalar = 0.001
+        if len(actions_rescaled.shape) == 1:
+            actions_rescaled[-1] *= scalar
+        else:
+            actions_rescaled[:,-1] *= scalar
+
+        return preprocess(np.hstack([states, actions])) #all manual for now
+
 
     #requires it be of shape N X M where N is number of samples
     def predict(self, states, actions, flatten=True):
         inputs = self.get_features(states, actions)
+        if len(inputs.shape) == 1:
+            inputs = inputs.reshape(1,-1)
         mean, sigma = self.model.predict(inputs, return_std=True)
+        action_dist = np.linalg.norm(mean-states)
+        if action_dist < 0.0001:
+            print("Low action dist")
+            print(states, "states")
+            print(actions, "actions")
         if flatten:
             return mean.flatten()
         return mean #, 2*sigma
+def preprocess(data):
+    return preprocessing.scale(data)
 

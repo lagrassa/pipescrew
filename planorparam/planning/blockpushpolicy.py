@@ -44,7 +44,7 @@ class BlockPushPolicy():
     """
     Planner that uses DFS; nothing fancy
     """
-    def plan(self, start, goal,  delta = 0.001,use_learned_model=True, horizon = 50):
+    def plan(self, start, goal,  delta = 0.001,use_learned_model=True, horizon = 50, plot_transition_model_devs = False):
         states = None
         action_shape = (8,)
         actions = None
@@ -54,6 +54,7 @@ class BlockPushPolicy():
         i = 0
         states = [current_state] #next states after taking an action, including the first though.
         actions = []
+        pred_gp_states = []
         while np.max(np.linalg.norm(current_state - goal, axis=0)) > goal_tol:
             #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
             #if in learned region, use learned one, else use normal one
@@ -70,6 +71,9 @@ class BlockPushPolicy():
                 model_idx = self.learned_transition_model_idx
             model_per_t.append(model_idx)
             next_state = model.predict(current_state, action)
+            pred_gp_state = self.learned_transition_model.predict(current_state, action)
+            pred_gp_states.append(pred_gp_state)
+            print("GP error", pred_gp_state-next_state)
             current_state = next_state.copy()
             #action = action.reshape((1,) + action.shape)
             #next_state = next_state.reshape((1,) + next_state.shape)
@@ -79,9 +83,16 @@ class BlockPushPolicy():
             i +=1
         states = np.vstack(states)
         actions = np.vstack(actions)
+        pred_gp_states = np.vstack(pred_gp_states)
         states = states.T
         actions= actions.T
+        pred_gp_states = pred_gp_states.T
         model_per_t = np.array(model_per_t)
+        if plot_transition_model_devs:
+            plt.plot(states[1,:], label="manual")
+            plt.plot(pred_gp_states[1,:], label="GP")
+            plt.legend()
+            plt.show()
         return states, actions, model_per_t
     """
     tol: percentage error that's OK relative to the magnitude of the motion
