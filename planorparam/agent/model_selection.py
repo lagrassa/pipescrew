@@ -8,21 +8,21 @@ class ModelSelector():
         self.learned_models = []
         if use_history:
             try:
-                self.old_states = np.load("data/old_states.npy")
-                self.old_errors = np.load("data/old_errors.npy")
+                self.all_states = np.load("data/old_states.npy")
+                self.all_errors = np.load("data/old_errors.npy")
             except FileNotFoundError:
-                self.old_states = None
-                self.old_errors = None
+                self.all_states = None
+                self.all_errors = None
         else:
-            self.old_states = None
-            self.old_errors = None
+            self.all_states = None
+            self.all_errors = None
 
         self.manual_model_classifiers = [] #expected uncertainty/error measurement for manual models. learned models should have their own
 
     def add(self, model, model_type="manual"):
         if model_type == "manual":
             self.manual_models.append(model)
-            classifier = ManualModelClassifier(init_states = self.old_states, init_errors = self.old_errors)
+            classifier = ManualModelClassifier(init_states = self.all_states, init_errors = self.all_errors)
             self.manual_model_classifiers.append(classifier)
         else:
             self.learned_models.append(model)
@@ -31,14 +31,14 @@ class ModelSelector():
     """
     def add_history(self, states, errors, input_model):
         #add to states in data
-        if self.old_states is not None:
-            self.old_states = np.vstack([self.old_states, states])
-            self.old_errors = np.vstack([self.old_errors, errors])
+        if self.all_states is not None:
+            self.all_states = np.vstack([self.all_states, states])
+            self.all_errors = np.vstack([self.all_errors, errors])
         else:
-            self.old_states = states
-            self.old_errors = errors
-        np.save("data/old_states.npy", self.old_states)
-        np.save("data/old_errors.npy", self.old_errors)
+            self.all_states = states
+            self.all_errors = errors
+        np.save("data/old_states.npy", self.all_states)
+        np.save("data/old_errors.npy", self.all_errors)
         for model, classifier in zip(self.manual_models, self.manual_model_classifiers):
             if input_model == model:
                 classifier.train(states, errors)
@@ -90,18 +90,9 @@ class ManualModelClassifier():
                 self.train(init_states, init_errors)
 
     def train(self, states, errors, params_file = None):
-        training_states = states
-        training_errors = errors
-        try:
-            old_states = np.load("data/old_states.npy")
-            old_errors = np.load("data/errors.npy")
-            training_states = np.vstack([old_states, states])
-            training_errors = np.vstack([old_errors, errors])
-        except FileNotFoundError:
-            print("COuld not find fikle")
-        if len(training_errors.shape) == 1:
-            training_errors = training_errors.reshape(1,-1)
-        self.rf_random.fit(training_states.T, training_errors.T)
+        if len(errors.shape) == 1:
+            errors = errors.reshape(1,-1)
+        self.rf_random.fit(states.T, errors.T)
         pred_states = self.rf_random.predict(states.T)
         print(np.mean(pred_states-errors), "mean errors on current data")
     """

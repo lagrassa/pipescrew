@@ -37,7 +37,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                             asset_options=cfg['block']['asset_options']
                             )
         self._block_name = 'block0'
-        rough_coef = 0.17
+        rough_coef = 0.5
         self.dt = cfg['scene']['gym']['dt']
         self._board = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['boardpiece']['dims'],
                                   shape_props=cfg['boardpiece']['shape_props'],

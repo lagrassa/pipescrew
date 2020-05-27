@@ -1,10 +1,10 @@
 scene:
     n_envs: 2
     es: 1
-    gui: 0
+    gui: 1
     gym:
       dt: 0.01
-      substeps: 2
+      substeps: 4
       flex:
         solver_type: 5
         num_outer_iterations: 4
@@ -15,7 +15,7 @@ scene:
         contact_regularization: 1e-7
         deterministic_mode: True
 env:
-    n_inter_steps: 200
+    n_inter_steps: 180
 franka: 
     asset_options:
         fix_base_link: True
@@ -85,7 +85,7 @@ block:
     rb_props: 
         color: [1, 0, 0]
     asset_options:
-        density: 3000
+        density: 300
 boardpiece:
     dims:
         width: 0.15

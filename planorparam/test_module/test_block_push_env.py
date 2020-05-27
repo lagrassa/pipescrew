@@ -131,7 +131,7 @@ def test_learned_transition_model_real_data():
     next_states = np.load("data/next_states.npy")
     lm = LearnedTransitionModel()
     lm.train(states, actions, next_states)
-    predicted_next_states = lm.predict(states, actions)
+    predicted_next_states = lm.predict(states, actions, flatten=False)
     max_dist = np.max(np.abs(predicted_next_states - next_states))
     assert(max_dist) < 0.01
     print("test passed")
@@ -160,12 +160,26 @@ def test_anomaly():
     policy = BlockPushPolicy(use_history=True)
     obs = vec_env._compute_obs(None)
     start_state = obs["observation"]
-    states, actions, model_per_t = policy.plan(start_state, block_goal, horizon=900)
-    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 0.25, use_history=True, model_per_t=model_per_t, plot_deviations = True)
+    states, actions, model_per_t = policy.plan(start_state, block_goal, use_learned_model=False, horizon=900)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 1.1, use_history=True, model_per_t=model_per_t, plot_deviations = True)
     assert(len(deviations) > 5)
+
+def test_patched():
+    """
+    robot detects significant deviations
+    """
+    vec_env, custom_draws = make_block_push_env()
+    block_goal = vec_env.get_delta_goal(-0.4)
+    policy = BlockPushPolicy(use_history=True)
+    obs = vec_env._compute_obs(None)
+    start_state = obs["observation"]
+    states, actions, model_per_t = policy.plan(start_state, block_goal, use_learned_model=True, horizon=900)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol=1.1, use_history=True,
+                                            model_per_t=model_per_t, plot_deviations=True)
+    assert (len(deviations) < 2)
     #plot points where there was an anomaly
 #test_go_to_start()
-test_anomaly()
 # test_learned_transition_model()
-#test_learned_transition_model_real_data()
+test_learned_transition_model_real_data()
+#test_patched()
 #test_short_goal()

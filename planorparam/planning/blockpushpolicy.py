@@ -32,7 +32,7 @@ class BlockPushPolicy():
 
     def sample_actions(self, state, goal, delta = 0.05):
         #Adapted for simpler action space
-        stiffness = 1000
+        stiffness = 300
         return np.array([-0.02, stiffness])
         if len(state.shape) == 2:
             dir = (goal[:,:3]-state[:,:3])/(np.linalg.norm(goal[:,:3]-state[:,:3]))
@@ -44,7 +44,7 @@ class BlockPushPolicy():
     """
     Planner that uses DFS; nothing fancy
     """
-    def plan(self, start, goal,  delta = 0.001, horizon = 50):
+    def plan(self, start, goal,  delta = 0.001,use_learned_model=True, horizon = 50):
         states = None
         action_shape = (8,)
         actions = None
@@ -60,7 +60,10 @@ class BlockPushPolicy():
             #we never reject actions rn, until we use a real planner
             print("curr distance", np.linalg.norm(current_state - goal))
             action = self.sample_actions(current_state, goal, delta = delta)
-            model = self.choose_transition_model(current_state, action)
+            if use_learned_model:
+                model = self.choose_transition_model(current_state, action)
+            else:
+                model = self.manual_transition_model
             if model == self.manual_transition_model:
                 model_idx = self.manual_transition_model_idx
             else:
@@ -88,6 +91,7 @@ class BlockPushPolicy():
                             tol = 0.01,
                             n_steps = 20,
                             use_history=False,
+                            add_all = True,
                             plot_deviations=False):
         """
         :param states, actions states and high level actions to execute
@@ -111,6 +115,7 @@ class BlockPushPolicy():
             deviations[t] = new_deviations/step_distances
             if (deviations[t]) > tol:
                     deviated_states.append(states[:,t])
+            if (deviations[t]) > tol or add_all:
                     learned_model_training_sprime.append(actual_states[-1])
                     learned_model_training_a.append(actions[:,t])
                     learned_model_training_s.append(states[:,t])
@@ -127,6 +132,9 @@ class BlockPushPolicy():
             plt.scatter(learned_timesteps, learned_state_preds, label="learned model predicted z" , marker="x" )
             plt.plot(timesteps, actual_states[:,1], label = "actual z")
             plt.legend()
+            plt.show()
+            plt.plot(timesteps, deviations)
+            plt.title("Deviations")
             plt.show()
         manual_states = states[:,1:][:,model_per_t == self.manual_transition_model_idx]
         manual_deviations = deviations[model_per_t == self.manual_transition_model_idx]

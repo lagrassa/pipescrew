@@ -10,7 +10,7 @@ class BlockPushSimpleTransitionModel():
 
     def predict(self, state, action):
         next_state = state.copy()
-        if action[-1] < 200:
+        if action[-1] < 5:
             return next_state #stiffness too low; won't move anywhere
         if len(state.shape)  ==2:
             next_state[:,:3] = next_state[:,:3]+action[:,:3]
@@ -93,10 +93,11 @@ class LearnedTransitionModel():
     def get_features(self, states, actions):
         return np.hstack([states, actions]) #all manual for now
 
-
-    def predict(self, state, action):
-        inputs = self.get_features(state, action).reshape(1,-1)
-        #mean, sigma =self.model.predict(inputs)
+    #requires it be of shape N X M where N is number of samples
+    def predict(self, states, actions, flatten=True):
+        inputs = self.get_features(states, actions)
         mean, sigma = self.model.predict(inputs, return_std=True)
-        return mean.flatten() #, 2*sigma
+        if flatten:
+            return mean.flatten()
+        return mean #, 2*sigma
 
