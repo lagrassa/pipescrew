@@ -174,7 +174,11 @@ class PegWorld():
         return traj
     def attach_shape(self, shape_name, grasp_pose):
         self.grasp = grasp_pose
-        attachment = ut.Attachment(self.robot, self.grasp_joint, grasp_pose, self.shape_name_to_shape[shape_name])
+        world_from_robot = ut.get_link_pose(self.robot, self.grasp_joint)
+        world_from_obj = ut.get_link_pose(self.shape_name_to_shape[shape_name], -1)
+        grasp_quat = ut.multiply(ut.invert(world_from_robot), world_from_obj)[1]
+        self.grasp = (self.grasp[0], grasp_quat)
+        attachment = ut.Attachment(self.robot, self.grasp_joint, self.grasp, self.shape_name_to_shape[shape_name])
         new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
         #ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
         attachment.assign()
@@ -224,21 +228,32 @@ class PegWorld():
         assert(traj is not None)
         return traj
 
-    def sample_trajs(self, goal, shape_class=Rectangle):
+    def sample_trajs(self, goal, shape_class=Rectangle, placing=False):
         ee_goals = []
         grasps = []
         state = p.saveState()
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
-        grasp_symmetries =  [0] # fix eventually shape_class.grasp_symmetries()
+        if placing:
+            shape_frame_symmetries = shape_class.placement_symmetries()
+            #shift the symmetrices by the grasp, since those are the actual angles we are sampling, not the robot joint angles. 
+            symmetries = []
+            for sampled_angle in shape_frame_symmetries:
+                grasp_quat = self.grasp[1]
+                grasp_yaw = ut.euler_from_quat(grasp_quat)[-1]
+                symmetries.append(sampled_angle+grasp_yaw)
+        else:
+            symmetries =  shape_class.grasp_symmetries()
         self.grasp_offset = 0.010+self.franka_tool_to_pb_link
-        for sym in grasp_symmetries:
+        #All of this is to make sure the grasps are within joint limits 
+        for sym in symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
                 curr_pos  = ut.get_joint_position(self.robot, sample_joint)
                 ee_goal, grasp = self.get_closest_ee_goals(goal, shape_class=Rectangle, grasp_offset = self.grasp_offset)
                 ee_goals.append(ee_goal)
                 grasps.append(grasp)
+                
         p.restoreState(state)
         #grasp = grasp_from_ee_and_obj(ee_goal, shape_goal)
         working_grasp = None
@@ -261,7 +276,7 @@ class PegWorld():
             hole_goal[0][-1] = 0.03
         else:
             np.save("custom_hole_goal.npy", hole_goal)
-        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle) 
+        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle, placing=True) 
         if push_down:
             state = p.saveState()
             #Move in that last bit
