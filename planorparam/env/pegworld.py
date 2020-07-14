@@ -15,12 +15,13 @@ I am not focusing on making the dynamics of this at all realistic.
 """
 class PegWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.62172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
+            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
             p.connect(p.DIRECT)
-         
+        
+        #for testing
         self.handonly = handonly
         p.setGravity(0,0,-9.8)
         self.in_hand = []
@@ -78,13 +79,11 @@ class PegWorld():
         self.circle = ut.create_cylinder(radius, block_height, color = (1,1,0,1))
         #make rectangle
         self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.5,0,0.1,1))
-        self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
         board_z = 0.013+0.005
         #The perception z axis estimates are bad so let's use prior information to give it the right pose  
         rectangle_loc[0][-1] = board_z+0.5*block_height
         circle_loc[0][-1] = board_z+0.5*block_height
-        obstacle_loc[0][-1] = board_z+0.5*0.1
         hole_goal[0][-1] = board_z+0.5*0.001
         self.hole_goal = hole_goal
         if load_previous:
@@ -97,14 +96,21 @@ class PegWorld():
             np.save("saves/circle_loc.npy", circle_loc)
             np.save("saves/obstacle_loc.npy", obstacle_loc)
             np.save("saves/hole_loc.npy", hole_goal)
+        
+        if obstacle_loc is not None:
+            self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
+            obstacle_loc[0][-1] = board_z+0.5*0.1
+        else:
+            self.obstacle = None
         ut.set_pose(self.rectangle, rectangle_loc)
         ut.set_pose(self.circle, circle_loc)
-        ut.set_pose(self.obstacle, obstacle_loc)
-        ut.set_pose(self.hole, hole_goal)
         self.shape_name_to_shape = {}
+        if obstacle_loc is not None:
+            ut.set_pose(self.obstacle, obstacle_loc)
+            self.shape_name_to_shape[Obstacle] = self.obstacle
+        ut.set_pose(self.hole, hole_goal)
         self.shape_name_to_shape[Circle] = self.circle
         self.shape_name_to_shape[Rectangle] = self.rectangle
-        self.shape_name_to_shape[Obstacle] = self.obstacle
         input("workspace okay?")
         p.saveBullet("curr_state.bt")
 
@@ -163,11 +169,11 @@ class PegWorld():
         p.restoreState(state)
         #for attachment in self.in_hand:
         #    attachment.assign()
-        obstacles = [self.obstacle, self.circle]
+        obstacles = [obs for obs in [self.obstacle, self.circle] if obs is not None]
         if not in_board:
             obstacles.append(self.board)
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=obstacles, attachments=self.in_hand,
-                      self_collisions=True, disabled_collisions=set(self.in_hand),
+                      self_collisions=True, disabled_collisions=set(self.in_hand[0].child),
                       weights=None, resolutions=None, smooth=100, restarts=5, iterations=100)
         
         p.restoreState(state)

@@ -24,7 +24,7 @@ class Circle:
             translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
         else:
             print(relevant_ids)
-            print("Not enough detections to make accurate pose estimate")
+            print("Not enough detections to make accurate pose estimate for circle ")
         return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
 class Obstacle:
     def __init__(self):
@@ -60,6 +60,9 @@ class Rectangle:
         return np.array([-np.pi, 0, np.pi])
     def grasp_symmetries():
         return np.array([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
+    def placement_symmetries():
+        return np.array([-np.pi/2,  0, np.pi/2, 1.5*np.pi, -1.5*np.pi])
+
     """
     returns the intervals of rotation that are identical, at least enough to be useful. 
     The triangle can't be rotated but the rectangle can be inserted at any interval of 3.14
@@ -82,11 +85,13 @@ class Rectangle:
 
         if len(relevant_ids) == 4:
             translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 0 in relevant_ids and 2 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        elif 1 in relevant_ids and 3 in relevant_ids:
-            translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        else:
+        corner_pairs = [(0,2), (1,3), (4,6), (5,7)]
+        for pair in corner_pairs:
+            if pair[0] in relevant_ids and pair[1] in relevant_ids:
+                relevant_tforms = [tforms[pair[0], tforms[pair[1]]]
+                translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
+
+        if translation is None:
             print(relevant_ids)
             print("Not enough detections to make accurate pose estimate")
 

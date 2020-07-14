@@ -10,8 +10,8 @@ import cv_bridge
 import time
 #rospy.init_node("planorparam")
 import numpy as np
-from franka_action_lib.srv import GetCurrentRobotStateCmd
-from franka_action_lib.msg import RobotState
+from franka_interface_msgs.srv import GetCurrentRobotStateCmd
+from franka_interface_msgs.msg import RobotState
 from autolab_core import RigidTransform
 import GPy as gpy
 from autolab_core import RigidTransform, YamlConfig
@@ -21,7 +21,7 @@ from perception_utils.apriltags import AprilTagDetector
 from perception_utils.realsense import get_first_realsense_sensor
 from modelfree import processimgs, vae
 from modelfree.ILPolicy import ILPolicy, process_action_data
-from test_module.test_behaviour_cloning import test_behaviour_cloning as get_il_policy
+#from test_module.test_behaviour_cloning import test_behaviour_cloning as get_il_policy
 from perception import Kinect2SensorFactory, KinectSensorBridged
 from sensor_msgs.msg import Image
 from perception.camera_intrinsics import CameraIntrinsics
@@ -53,7 +53,8 @@ class Robot():
     def setup_pbworld(self, visualize):
         board_loc = [[0.479,0.0453,0.013],[0.707,0.707,0,0]]
         circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
-        obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
+        #obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
+        obstacle_loc = None
         rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
         hole_goal = rigid_transform_to_pb_pose(self.get_shape_goal_location(Rectangle))
         self.pb_world = PegWorld(rectangle_loc=rectangle_loc, hole_goal = hole_goal, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=visualize)
@@ -61,14 +62,14 @@ class Robot():
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
         self.sensor = Kinect2SensorFactory.sensor('bridged', self.cfg)  # Kinect sensor object
-        prefix = "/overhead"
+        prefix = ""
         self.sensor.topic_image_color  = prefix+self.sensor.topic_image_color
         self.sensor.topic_image_depth  = prefix+self.sensor.topic_image_depth
         self.sensor.topic_info_camera  = prefix+self.sensor.topic_info_camera
         self.sensor.start()
         self.april = AprilTagDetector(self.cfg['april_tag'])
         # intr = sensor.color_intrinsics #original
-        self.intr = CameraIntrinsics('k4a', 970.4990844726562,970.1990966796875, 1025.4967041015625, 777.769775390625, height=1536, width=2048)
+        self.intr = CameraIntrinsics('k4a', 970.4990844726562,1025.4967041015625, 970.1990966796875, 777.769775390625, height=1536, width=2048) #fx fy cx cy
         
     """
     executes the model-free policy
@@ -114,22 +115,23 @@ class Robot():
                     print("Detected successfully in hole")
                     return 
 
-   """
-   @param bool straighten - whether the roll and pitch should be
-               forced to 0 as prior information that the object is flat
-   @param shape_class Shape \in {Circle, Square, Rectangle, etc} - type of shape the detector should look for
-   @param goal whether the detector should look for the object or goal hole
-   """
+    """
+    @param bool straighten - whether the roll and pitch should be
+                forced to 0 as prior information that the object is flat
+    @param shape_class Shape \in {Circle, Square, Rectangle, etc} - type of shape the detector should look for
+    @param goal whether the detector should look for the object or goal hole
+    """
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
-        detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
+        detections = self.april.detect(self.sensor, self.intr, vis=1)#self.cfg['vis_detect'])
 
         detected_ids = []
         for new_detection in detections:
             detected_ids.append(int(new_detection.from_frame.split("/")[1])) #won't work for non-int values
             T_tag_cameras.append(new_detection)
         T_tag_camera = shape_class.tforms_to_pose(detected_ids, T_tag_cameras, goal=goal) #as if there were a tag in the center
+        T_tag_camera.to_frame="kinect2_overhead"
         T_tag_world = self.T_camera_world * T_tag_camera
         if straighten:
             T_tag_world  = straighten_transform(T_tag_world)
@@ -139,6 +141,7 @@ class Robot():
     def model_based_grasp_shape(self, T_tag_world, shape_type, monitor_execution=False, grasp_offset=None):
        if grasp_offset is None:
            grasp_offset = self.grasp_offset
+       import ipdb; ipdb.set_trace()
        fa.open_gripper()
        path = self.pb_world.grasp_object(visualize=True)
        res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5)
@@ -573,7 +576,7 @@ def run_insert_exp(robot, prefix, training=True, use_planner=False):
     fa.reset_joints()
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
-    robot.setup_pbworld(visualize=False)
+    robot.setup_pbworld(visualize=True)
     robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner)
     start_time = time.time()
     #result = robot.insert_shape(use_planner=use_planner)
@@ -615,7 +618,9 @@ if __name__ == "__main__":
   
 
     #input("reset scene. Ready?")
+    print("shape loc", np.round(robot.get_shape_location(Rectangle).translation,2))
+    import ipdb; ipdb.set_trace()
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     for i in [18,19,20,21,22]: #18 is where we do DAGGER
-        run_insert_exp(robot, i, training=False, use_planner=True)
+        run_insert_exp(robot, i, training=True, use_planner=True)
     
