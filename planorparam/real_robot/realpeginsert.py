@@ -52,8 +52,9 @@ class Robot():
         if setup_pb:
             self.setup_pbworld(visualize=visualize)
     def setup_pbworld(self, visualize):
-        board_loc = [[0.479,0.0453,0.013],[0.707,0.707,0,0]]
+        board_loc = [[0.379,-0.0453,0.013],[0.707,0.707,0,0]]
         #import ipdb; ipdb.set_trace()
+        import ipdb; ipdb.set_trace()
         circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
         #obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
         obstacle_loc = None
@@ -146,7 +147,6 @@ class Robot():
     def model_based_grasp_shape(self, T_tag_world, shape_type, monitor_execution=False, grasp_offset=None):
        if grasp_offset is None:
            grasp_offset = self.grasp_offset
-       import ipdb; ipdb.set_trace()
        fa.open_gripper()
        path = self.pb_world.grasp_object(visualize=True)
        res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5)
@@ -586,9 +586,8 @@ def run_insert_exp(robot, prefix, training=True, use_planner=False):
     robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner)
     start_time = time.time()
     #result = robot.insert_shape(use_planner=use_planner)
-    robot.insert_shape(use_planner=True)
+    #robot.insert_shape(use_planner=True)
     print("time elapsed", time.time()-start_time)
-    return
     result = "expected_model_failure" #does happen, just a workaround for a bug in the code
     if result == "model_failure" or result == "expected_model_failure":
         if training: 
@@ -625,7 +624,6 @@ if __name__ == "__main__":
 
     #input("reset scene. Ready?")
     print("shape loc", np.round(robot.get_shape_location(Rectangle).translation,2))
-    import ipdb; ipdb.set_trace()
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     for i in [18,19,20,21,22]: #18 is where we do DAGGER
         run_insert_exp(robot, i, training=True, use_planner=True)
