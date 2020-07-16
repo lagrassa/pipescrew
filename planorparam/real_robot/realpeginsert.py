@@ -39,6 +39,7 @@ class Robot():
         self.bad_model_states = np.load("data/bad_model_states.npy")
         self.good_model_states = np.load("data/good_model_states.npy")
         self.autoencoder = None
+        self.grip_width = 0.03
         self.il_policy=None
         self.bridge = cv_bridge.CvBridge()
         self.shape_to_goal_loc = {}
@@ -52,6 +53,7 @@ class Robot():
             self.setup_pbworld(visualize=visualize)
     def setup_pbworld(self, visualize):
         board_loc = [[0.479,0.0453,0.013],[0.707,0.707,0,0]]
+        #import ipdb; ipdb.set_trace()
         circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
         #obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
         obstacle_loc = None
@@ -126,7 +128,7 @@ class Robot():
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
-        detections = self.april.detect(self.sensor, self.intr, vis=1)#self.cfg['vis_detect'])
+        detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
 
         detected_ids = []
         for new_detection in detections:
@@ -135,6 +137,7 @@ class Robot():
         T_tag_camera = shape_class.tforms_to_pose(detected_ids, T_tag_cameras, goal=goal) #as if there were a tag in the center
         T_tag_camera.to_frame="kinect2_overhead"
         T_tag_world = self.T_camera_world * T_tag_camera
+
         if straighten:
             T_tag_world  = straighten_transform(T_tag_world)
         print("detected pose", np.round(T_tag_world.translation,3))
@@ -369,7 +372,7 @@ class Robot():
             if new_pos.translation[2]-self.grasp_offset < 0.005:
                 expect_contact = True
             if traj_type == "cart":
-                fa.goto_pose_with_cartesian_control(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+                fa.goto_pose(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             else:
                 #print("Curr joints", np.round(fa.get_joints(),2))
                 #print("proposed joints", np.round(pt,2))

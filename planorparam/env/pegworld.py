@@ -86,6 +86,7 @@ class PegWorld():
         circle_loc[0][-1] = board_z+0.5*block_height
         hole_goal[0][-1] = board_z+0.5*0.001
         self.hole_goal = hole_goal
+        import ipdb; ipdb.set_trace()
         if load_previous:
             rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
             circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
@@ -97,7 +98,7 @@ class PegWorld():
             np.save("saves/obstacle_loc.npy", obstacle_loc)
             np.save("saves/hole_loc.npy", hole_goal)
         
-        if obstacle_loc is not None:
+        if obstacle_loc is not None and obstacle_loc.any() is not None:
             self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
             obstacle_loc[0][-1] = board_z+0.5*0.1
         else:
@@ -105,7 +106,7 @@ class PegWorld():
         ut.set_pose(self.rectangle, rectangle_loc)
         ut.set_pose(self.circle, circle_loc)
         self.shape_name_to_shape = {}
-        if obstacle_loc is not None:
+        if self.obstacle is not None:
             ut.set_pose(self.obstacle, obstacle_loc)
             self.shape_name_to_shape[Obstacle] = self.obstacle
         ut.set_pose(self.hole, hole_goal)
@@ -172,8 +173,12 @@ class PegWorld():
         obstacles = [obs for obs in [self.obstacle, self.circle] if obs is not None]
         if not in_board:
             obstacles.append(self.board)
+        disabled_collisions =  []
+        if len(self.in_hand) == 1:
+            disabled_collisions.append((self.in_hand[0].child, self.board))
+            disabled_collisions.append((self.board, self.in_hand[0].child))
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=obstacles, attachments=self.in_hand,
-                      self_collisions=True, disabled_collisions=set(self.in_hand[0].child),
+                      self_collisions=True, disabled_collisions=set(disabled_collisions),
                       weights=None, resolutions=None, smooth=100, restarts=5, iterations=100)
         
         p.restoreState(state)
@@ -306,7 +311,7 @@ class PegWorld():
 
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
-    pw = PegWorld(visualize=True, handonly = False, load_previous=False)
+    pw = PegWorld(visualize=True, handonly = False, load_previous=True)
     pw.grasp_object(shape_class=Rectangle, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
     pw.place_object(shape_class=Rectangle, visualize=True)
