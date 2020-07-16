@@ -69,7 +69,9 @@ class Robot():
         self.sensor.start()
         self.april = AprilTagDetector(self.cfg['april_tag'])
         # intr = sensor.color_intrinsics #original
-        self.intr = CameraIntrinsics('k4a', 970.4990844726562,1025.4967041015625, 970.1990966796875, 777.769775390625, height=1536, width=2048) #fx fy cx cy
+        overhead_intr = CameraIntrinsics('k4a', fx=970.4990844726562,cx=1025.4967041015625, fy=970.1990966796875, cy=777.769775390625, height=1536, width=2048) #fx fy cx cy overhead
+        frontdown_intr = CameraIntrinsics('k4a',fx=611.9021606445312,cx=637.0317993164062,fy=611.779968261718,cy=369.051239013671, height=1536, width=2048) #fx fy cx cy frontdown
+        self.intr = overhead_intr
         
     """
     executes the model-free policy
@@ -145,7 +147,7 @@ class Robot():
        fa.open_gripper()
        path = self.pb_world.grasp_object(visualize=True)
        res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5)
-       fa.close_gripper()
+       fa.goto_gripper(self.grip_width, grasp=True)
        return res
 
         
@@ -183,6 +185,7 @@ class Robot():
        path = self.linear_interp_planner(fa.get_pose(), T_tool_world_fixed_rot)
        self.follow_traj(path, monitor_execution=monitor_execution)
        fa.close_gripper()
+       fa.goto_gripper(self.grip_width, grasp=True)
 
     """
     Samples one point in the precondition of the model-free policy
