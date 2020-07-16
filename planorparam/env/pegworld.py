@@ -15,7 +15,7 @@ I am not focusing on making the dynamics of this at all realistic.
 """
 class PegWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
+            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.379, -0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -86,7 +86,6 @@ class PegWorld():
         circle_loc[0][-1] = board_z+0.5*block_height
         hole_goal[0][-1] = board_z+0.5*0.001
         self.hole_goal = hole_goal
-        import ipdb; ipdb.set_trace()
         if load_previous:
             rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
             circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
@@ -240,8 +239,6 @@ class PegWorld():
         return traj
 
     def sample_trajs(self, goal, shape_class=Rectangle, placing=False):
-        ee_goals = []
-        grasps = []
         state = p.saveState()
         sample_joint = 6
         original = ut.get_joint_position(self.robot, sample_joint)
@@ -257,6 +254,9 @@ class PegWorld():
             symmetries =  shape_class.grasp_symmetries()
         self.grasp_offset = 0.010+self.franka_tool_to_pb_link
         #All of this is to make sure the grasps are within joint limits 
+        ee_goals = []
+        grasps = []
+        joint_angles = []
         for sym in symmetries:
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
@@ -264,18 +264,22 @@ class PegWorld():
                 ee_goal, grasp = self.get_closest_ee_goals(goal, shape_class=Rectangle, grasp_offset = self.grasp_offset)
                 ee_goals.append(ee_goal)
                 grasps.append(grasp)
+                joint_angles.append(original+sym)
                 
         p.restoreState(state)
         #grasp = grasp_from_ee_and_obj(ee_goal, shape_goal)
-        working_grasp = None
-        working_traj = None
-        for ee_goal, grasp in zip(ee_goals, grasps):
+        working_grasp = []
+        working_traj = []
+        working_joint_angles = []
+        for ee_goal, grasp, joint_angle in zip(ee_goals, grasps, joint_angles):
             grasp_traj = self.make_traj(ee_goal)
             if grasp_traj is not None:
-                working_grasp = grasp 
-                working_traj = grasp_traj
-        assert(working_traj is not None)
-        return working_traj, working_grasp
+                working_grasp.append(grasp) 
+                working_traj.append(grasp_traj)
+                working_joint_angles.append(joint_angle)
+        assert(len(working_traj) > 0)
+        min_joint_angle_idx = np.argmin(working_joint_angles)
+        return working_traj[min_joint_angle_idx], working_grasp[min_joint_angle_idx]
     def close(self):
         p.disconnect()
     """
