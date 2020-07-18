@@ -75,8 +75,6 @@ class PegWorld():
         board_loc[0][-1] -= 0.5*fake_board_thickness
         ut.set_pose(self.board, board_loc)
         #make circle
-        radius = 0.078/2
-        self.circle = ut.create_cylinder(radius, block_height, color = (1,1,0,1))
         #make rectangle
         self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.5,0,0.1,1))
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
@@ -91,23 +89,33 @@ class PegWorld():
             circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
             obstacle_loc = np.load("saves/obstacle_loc.npy",allow_pickle=True)
             hole_goal = np.load("saves/hole_loc.npy", allow_pickle=True)
+            for loc in [rectangle_loc, circle_loc, obstacle_loc, hole_goal]:
+                if loc[0].any() is None:
+                    loc = None
         else:
             np.save("saves/rectangle_loc.npy", rectangle_loc)
             np.save("saves/circle_loc.npy", circle_loc)
             np.save("saves/obstacle_loc.npy", obstacle_loc)
             np.save("saves/hole_loc.npy", hole_goal)
         
-        if obstacle_loc is not None and obstacle_loc.any() is not None:
+        if obstacle_loc is not None:
             self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
             obstacle_loc[0][-1] = board_z+0.5*0.1
+            ut.set_pose(self.obstacle, obstacle_loc)
         else:
             self.obstacle = None
-        ut.set_pose(self.rectangle, rectangle_loc)
-        ut.set_pose(self.circle, circle_loc)
+        if circle_loc is not None:
+            radius = 0.078/2
+            self.circle = ut.create_cylinder(radius, block_height, color = (1,1,0,1))
+            ut.set_pose(self.circle, circle_loc)
+        else:
+            self.circle = None
+        if rectangle_loc is not None:
+            ut.set_pose(self.rectangle, rectangle_loc)
+            import ipdb; ipdb.set_trace()
+
         self.shape_name_to_shape = {}
-        if self.obstacle is not None:
-            ut.set_pose(self.obstacle, obstacle_loc)
-            self.shape_name_to_shape[Obstacle] = self.obstacle
+        self.shape_name_to_shape[Obstacle] = self.obstacle
         ut.set_pose(self.hole, hole_goal)
         self.shape_name_to_shape[Circle] = self.circle
         self.shape_name_to_shape[Rectangle] = self.rectangle
@@ -173,11 +181,11 @@ class PegWorld():
         if not in_board:
             obstacles.append(self.board)
         disabled_collisions =  []
-        if len(self.in_hand) == 1:
-            disabled_collisions.append((self.in_hand[0].child, self.board))
-            disabled_collisions.append((self.board, self.in_hand[0].child))
+        #if len(self.in_hand) == 1:
+        #    disabled_collisions.append((self.in_hand[0].child, self.board))
+        #    disabled_collisions.append((self.board, self.in_hand[0].child))
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=obstacles, attachments=self.in_hand,
-                      self_collisions=True, disabled_collisions=set(disabled_collisions),
+                      self_collisions=True,
                       weights=None, resolutions=None, smooth=100, restarts=5, iterations=100)
         
         p.restoreState(state)
@@ -252,7 +260,7 @@ class PegWorld():
                 symmetries.append(sampled_angle+grasp_yaw)
         else:
             symmetries =  shape_class.grasp_symmetries()
-        self.grasp_offset = 0.010+self.franka_tool_to_pb_link
+        self.grasp_offset = 0.005+self.franka_tool_to_pb_link
         #All of this is to make sure the grasps are within joint limits 
         ee_goals = []
         grasps = []
