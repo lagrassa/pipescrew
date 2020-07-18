@@ -31,13 +31,13 @@ from frankapy import FrankaArm
 fa = FrankaArm()
 
 class Robot():
-    def __init__(self, visualize=False, setup_pb=True):
+    def __init__(self, visualize=False, setup_pb=True, data_folder="test"):
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         self.contact_threshold = -3.5 # less than is in contact
-        self.bad_model_states = np.load("data/bad_model_states.npy")
-        self.good_model_states = np.load("data/good_model_states.npy")
+        self.bad_model_states = np.load("data/"+data_folder+"/bad_model_states.npy")
+        self.good_model_states = np.load("data/"+data_folder+"/good_model_states.npy")
         self.autoencoder = None
         self.grip_width = 0.03
         self.il_policy=None
@@ -144,12 +144,12 @@ class Robot():
         print("detected pose", np.round(T_tag_world.translation,3))
         return T_tag_world
 
-    def model_based_grasp_shape(self, T_tag_world, shape_type, monitor_execution=False, grasp_offset=None):
+    def model_based_grasp_shape(self, T_tag_world, shape_type, monitor_execution=False, grasp_offset=None, training=training):
        if grasp_offset is None:
            grasp_offset = self.grasp_offset
        fa.open_gripper()
        path = self.pb_world.grasp_object(visualize=True)
-       res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5)
+       res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5, training=training)
        fa.goto_gripper(self.grip_width, grasp=True)
        return res
 
@@ -159,10 +159,10 @@ class Robot():
     @param T_tag_world RigidTransform transform from tag to world 
     """
     def grasp_shape(self,T_tag_world, shape_type, grasp_offset=0.024, 
-                    monitor_execution=True, use_planner=False):
+                    monitor_execution=True, use_planner=False, training=True):
        self.holding_type = shape_type
        if use_planner:
-           return self.model_based_grasp_shape(T_tag_world, shape_type, grasp_offset=grasp_offset, monitor_execution=monitor_execution)
+           return self.model_based_grasp_shape(T_tag_world, shape_type, grasp_offset=grasp_offset, monitor_execution=monitor_execution, training=training, training=training)
 
        x_offset = 0
        self.grasp_offset = grasp_offset
@@ -194,9 +194,9 @@ class Robot():
     Samples one point in the precondition of the model-free policy
     Assumes only one model-free policy
     """
-    def sample_modelfree_precond_pt(self):
+    def sample_modelfree_precond_pt(self, data_folder="test"):
         ee_data = None
-        for fn in os.listdir("data/"):
+        for fn in os.listdir("data/"+data_folder):
             if "ee_data" in fn:
                 new_ee_data = np.load("data/"+fn)[0,:]
                 if ee_data is None:
@@ -215,8 +215,8 @@ class Robot():
     if use_planner is set to true, then it computes the path using the planner
     else, it just uses linear interpolation
     """
-    def goto_modelfree_precond(self, use_planner=False):
-        sample = self.sample_modelfree_precond_pt() 
+    def goto_modelfree_precond(self, use_planner=False, data_folder="test"):
+        sample = self.sample_modelfree_precond_pt(data_folder=data_folder) 
         monitor_execution=True
         #go up slightly to avoid the expected model failure region
         if use_planner:
@@ -243,15 +243,15 @@ class Robot():
     uses the model to put the shape into the corresponding hole
     assumes the shape being inserted is a Rectangle
     """
-    def model_based_insert_shape(self, T_tool_world, monitor_execution=True):
+    def model_based_insert_shape(self, T_tool_world, monitor_execution=True, training=True):
         hole_goal = rigid_transform_to_pb_pose(T_tool_world)
         place_traj = self.pb_world.place_object(shape_class=Rectangle, visualize=True)
-        res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
+        res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3, training=training)
         if res == "expected_good":
             down_pose = fa.get_pose()
             down_amount = 0.02
             down_pose.translation[-1] -= down_amount
-            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 2)
+            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 2, training=training)
             
         else:
             return res
@@ -320,10 +320,10 @@ class Robot():
     on the points or only selecting some of them. 
     
     """
-    def in_region_with_modelfailure(self,pt, retrain=True):
+    def in_region_with_modelfailure(self,pt, data_folder,retrain=True):
         if retrain:
-            bad = np.load("data/bad_model_states.npy", allow_pickle=True)
-            good = np.load("data/good_model_states.npy", allow_pickle=True)
+            bad = np.load("data/"+data_folder+"/bad_model_states.npy", allow_pickle=True)
+            good = np.load("data/"+data_folder+"/good_model_states.npy", allow_pickle=True)
             if len(bad) == 0 and len(good) == 0:
                 return False
             X = np.vstack([good, bad])
@@ -352,7 +352,7 @@ class Robot():
     
     return: a string indicating whether something unexpected was observed
     """
-    def follow_traj(self, path, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart", dt = 2):
+    def follow_traj(self, path, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart", dt = 2, training=True):
         cart_poses = []
         if monitor_execution:
             for pt in path:
@@ -409,12 +409,13 @@ class Robot():
                 elif force > self.contact_threshold and expect_contact:
                     print("expected contact")
                     model_deviation = True
-                if model_deviation and len(cart_poses) >= 2:
+                if model_deviation and len(cart_poses) >= 2 and training:
                     self.bad_model_states = np.vstack([self.bad_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
-                elif not model_deviation and len(cart_poses) >= 2:
+                elif not model_deviation and len(cart_poses) >= 2 and training:
                     self.good_model_states = np.vstack([self.good_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
-                np.save("data/bad_model_states.npy", self.bad_model_states)
-                np.save("data/good_model_states.npy", self.good_model_states)
+                if training:
+                    np.save("data/"+data_folder+"/bad_model_states.npy", self.bad_model_states)
+                    np.save("data/"+data_folder+"/good_model_states.npy", self.good_model_states)
                 if model_deviation:
                     print("Ending MB policy due to model deviation")
                     return "model_failure"
@@ -480,13 +481,13 @@ class Robot():
 
         input("Ready for kinesthetic teaching?")
         fa.apply_effector_forces_torques(time, 0, 0, 0)
-        np.save("data/"+str(prefix)+"ee_data.npy", self.ee_infos)
+        np.save("data/"+data_folder+"/"+str(prefix)+"ee_data.npy", self.ee_infos)
         if do_intel:
-            np.save("data/"+str(prefix)+"intel_data.npy", self.intel_camera_images)
+            np.save("data/"+data_folder+"/"+str(prefix)+"intel_data.npy", self.intel_camera_images)
 
             self.intel_subscriber.unregister()
         if do_kinect:
-            np.save("data/"+str(prefix)+"kinect_data.npy", self.kinect_camera_images)
+            np.save("data/"+data_folder+"/"+str(prefix)+"kinect_data.npy", self.kinect_camera_images)
             self.kinect_subscriber.unregister()
 
     """
@@ -577,28 +578,26 @@ def straighten_transform(rt):
     return new_rt
 
 
-def run_insert_exp(robot, prefix, training=True, use_planner=False):
+def run_insert_exp(robot, prefix, training=True, use_planner=False, data_folder="test"):
     fa.open_gripper()
     fa.reset_joints()
     input("reset scene. Ready?")
     shape_center = robot.get_shape_location(Rectangle)
     robot.setup_pbworld(visualize=True)
-    robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner)
+    robot.grasp_shape(shape_center, Rectangle, use_planner=use_planner, training=False) #not training for this part
     start_time = time.time()
-    #result = robot.insert_shape(use_planner=use_planner)
-    #robot.insert_shape(use_planner=True)
+    result = robot.insert_shape(use_planner=True, training=training)
     print("time elapsed", time.time()-start_time)
-    result = "expected_model_failure" #does happen, just a workaround for a bug in the code
     if result == "model_failure" or result == "expected_model_failure":
         if training: 
             #robot.kinesthetic_teaching(prefix)
-            robot.goto_modelfree_precond(use_planner=True)
+            robot.goto_modelfree_precond(use_planner=True, data_folder=data_folder)
             actions, images, ees = robot.keyboard_teleop()
-            np.save("data/"+str(prefix)+"actions.npy", actions)
-            np.save("data/"+str(prefix)+"kinect_data.npy", images)
-            np.save("data/"+str(prefix)+"ee_data.npy", ees)
+            np.save("data/"+data_folder+"/"+str(prefix)+"actions.npy", actions)
+            np.save("data/"+data_folder+"/"+str(prefix)+"kinect_data.npy", images)
+            np.save("data/"+data_folder+"/"+str(prefix)+"ee_data.npy", ees)
         else:
-            robot.goto_modelfree_precond(use_planner=True)
+            robot.goto_modelfree_precond(use_planner=True, data_folder=data_folder)
             robot.modelfree() #avoiding the region where the model is bad
             print("time elapsed", time.time()-start_time)
         
@@ -613,6 +612,10 @@ if __name__ == "__main__":
     
     fa.open_gripper()
     fa.reset_joints()
+    data_folder = sys.argv[1]
+    if not os.isdir("data/"+data_folder):
+        os.makedir("data/"+data_folder)
+
     robot = Robot(visualize=True, setup_pb=False)
     #robot.modelfree()
     #import ipdb; ipdb.set_trace()
@@ -620,11 +623,9 @@ if __name__ == "__main__":
     #np.save("data/"+str(prefix)+"actions.npy", actions)
     #np.save("data/"+str(prefix)+"kinect_data.npy", images)
     #np.save("data/"+str(prefix)+"ee_data.npy", ees)
-  
-
     #input("reset scene. Ready?")
     print("shape loc", np.round(robot.get_shape_location(Rectangle).translation,2))
     print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
     for i in [18,19,20,21,22]: #18 is where we do DAGGER
-        run_insert_exp(robot, i, training=True, use_planner=True)
+        run_insert_exp(robot, i, training=True, use_planner=True, data_folder=data_folder)
     
