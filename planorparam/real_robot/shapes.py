@@ -25,6 +25,7 @@ class Circle:
         else:
             print(relevant_ids)
             print("Not enough detections to make accurate pose estimate for circle ")
+            return None
         return RigidTransform(rotation = np.eye(3), translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
 class Obstacle:
     def __init__(self):
@@ -34,6 +35,7 @@ class Obstacle:
         return [-np.pi,-np.pi/2, 0, np.pi/2, np.pi]
     @staticmethod
     def tforms_to_pose(ids, tforms,goal=False):
+        import ipdb; ipdb.set_trace()
         rectangles_ids = [8,9]
         relevant_ids = [ar_id for ar_id in ids if ar_id in rectangles_ids]
         relevant_tforms = []
@@ -50,6 +52,7 @@ class Obstacle:
         else:
             print(relevant_ids)
             print("Not enough detections to make accurate pose estimate")
+            return None
         return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
 
 class Rectangle:
@@ -61,7 +64,7 @@ class Rectangle:
     def grasp_symmetries():
         return np.array([-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
     def placement_symmetries():
-        return np.array([-np.pi/2,  0, np.pi/2, 1.5*np.pi, -1.5*np.pi])
+        return np.array([0, -np.pi, np.pi, 2*np.pi])
 
     """
     returns the intervals of rotation that are identical, at least enough to be useful. 
@@ -96,5 +99,5 @@ class Rectangle:
         if translation is None:
             print(relevant_ids)
             print("Not enough detections to make accurate pose estimate")
-
-        return RigidTransform(rotation = avg_rotation.rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
+            return None
+        return RigidTransform(rotation = relevant_tforms[0].rotation, translation = translation, to_frame = tforms[0].to_frame, from_frame = "peg_center")
