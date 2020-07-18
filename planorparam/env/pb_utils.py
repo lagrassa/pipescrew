@@ -2433,16 +2433,17 @@ def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disa
             if pairwise_link_collision(body, link1, body, link2): #, **kwargs):
                 if link1 == 6 and link2 == 8 or link1 == 8 and link2 == 6:
                     return False #panda is improperly specified: they do indeed have a contact point
-                print("Pairwise link collision", get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
+                #print("Pairwise link collision", get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
                 set_joint_positions(body, joints, old_q)
                 [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
                 return True
         for body1, body2 in check_body_pairs:
             if pairwise_collision(body1, body2, **kwargs):
-                print("Pairwise body collision", get_body_name(body1), get_body_name(body2))
-                #set_joint_positions(body, joints, old_q)
-                #[set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
-                #return True
+                #print("Pairwise body collision", body1, body2)
+                #print("Pairwise body collision", get_body_name(body1), get_body_name(body2))
+                set_joint_positions(body, joints, old_q)
+                [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
+                return True
         set_joint_positions(body, joints, old_q)
         [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
         return False
