@@ -11,5 +11,5 @@ setup(name='planorparam',
       author='Alex LaGrassa',
       author_email='lagrassa@cmu.edu',
       url='none',
-      packages=['planning', 'modelfree', 'env', 'agent', 'real_robot'],
+      packages=['planning', 'modelfree', 'env', 'agent', 'real_robot', 'utils'],
      )
