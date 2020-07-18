@@ -87,7 +87,6 @@ class PegWorld():
             rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
             circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
             obstacle_loc = np.load("saves/obstacle_loc.npy",allow_pickle=True)
-            obstacle_loc = None
             hole_goal = np.load("saves/hole_loc.npy", allow_pickle=True)
             for loc in [rectangle_loc, circle_loc, obstacle_loc, hole_goal]:
                 if loc is None or loc[0].any() is None:
@@ -116,7 +115,6 @@ class PegWorld():
 
         self.shape_name_to_shape = {}
         self.shape_name_to_shape[Obstacle] = self.obstacle
-        import ipdb; ipdb.set_trace()
         ut.set_pose(self.hole, hole_goal)
         self.shape_name_to_shape[Circle] = self.circle
         self.shape_name_to_shape[Rectangle] = self.rectangle
@@ -288,10 +286,12 @@ class PegWorld():
                 working_traj.append(grasp_traj)
                 working_joint_angles.append(joint_angle)
         assert(len(working_traj) > 0)
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
+        #distances = [(working_joint_angle-original)**2  for working_joint_angle in working_joint_angles]
         distances = [(working_joint_angle-original)**2  for working_joint_angle in working_joint_angles]
-        min_joint_angle_idx = np.argmin(distances)
-        return working_traj[min_joint_angle_idx], working_grasp[min_joint_angle_idx]
+        min_joint_angle_idxs = np.argmin(distances)
+        return working_traj[min_joint_angle_idxs], working_grasp[min_joint_angle_idxs]
+
     def close(self):
         p.disconnect()
     """
