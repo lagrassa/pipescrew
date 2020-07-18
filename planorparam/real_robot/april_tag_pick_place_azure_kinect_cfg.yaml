@@ -17,7 +17,7 @@ april_tag:
     quad_contours: True
   tag_size: 0.0260 # 1 inch in meters  
 
-T_k4a_franka_path: kinect2_overhead_to_world.tf
+T_k4a_franka_path: overheadparams/kinect2_overhead_to_world.tf
 
 quality: Kinect2BridgedQuality.HD
 frame: k4a
