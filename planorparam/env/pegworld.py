@@ -83,9 +83,9 @@ class PegWorld():
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
         board_z = 0.013+0.005
         #The perception z axis estimates are bad so let's use prior information to give it the right pose  
-        rectangle_loc[0][-1] = board_z+0.5*block_height
-        circle_loc[0][-1] = board_z+0.5*block_height
-        square_loc[0][-1] = board_z+0.5*block_height
+        for loc in [rectangle_loc, circle_loc, square_loc]:
+            if loc is not None:
+                loc[0][-1] = board_z+0.5*block_height
         hole_goal[0][-1] = board_z+0.5*0.001
         if load_previous:
             rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
@@ -93,7 +93,7 @@ class PegWorld():
             obstacle_loc = np.load("saves/obstacle_loc.npy",allow_pickle=True)
             square_loc = np.load("saves/square_loc.npy",allow_pickle=True)
             hole_goal = np.load("saves/hole_loc.npy", allow_pickle=True)
-            for loc in [rectangle_loc, circle_loc, obstacle_loc, hole_goal]:
+            for loc in [rectangle_loc, circle_loc, obstacle_loc, hole_goal, square_loc]:
                 if loc is None or loc[0].any() is None:
                     loc = None
         else:
@@ -121,7 +121,6 @@ class PegWorld():
         else:
             self.rectangle=None
         if square_loc is not None:
-            import ipdb; ipdb.set_trace()
             self.square = ut.create_box(0.072, 0.072, block_height, color=(0.8, 0, 0.1, 1)) 
             ut.set_pose(self.square, square_loc)
             
@@ -194,7 +193,7 @@ class PegWorld():
         obstacles = [obs for obs in [self.obstacle, self.square, self.circle, self.topcamera_block, self.frontcamera_block] if obs is not None and obs != self.shape_name_to_shape[shape_class.__name__]]
         if not in_board:
             obstacles.append(self.board)
-        disabled_body_collisions =  [(self.board, self.rectangle), (self.hole, self.rectangle)]
+        disabled_body_collisions =  [(self.board, self.rectangle), (self.hole, self.rectangle),(self.board, self.square),(self.robot, self.shape_name_to_shape[shape_class.__name__])]
         #if len(self.in_hand) == 1:
         #    disabled_collisions.append((self.in_hand[0].child, self.board))
         #    disabled_collisions.append((self.board, self.in_hand[0].child))
@@ -250,10 +249,21 @@ class PegWorld():
     """
     def grasp_object(self, shape_class=Rectangle, visualize=False):
         shape_goal = p.getBasePositionAndOrientation(self.shape_name_to_shape[shape_class.__name__])
-        traj, grasp = self.sample_trajs(shape_goal, shape_class=shape_class)
+        trajs, grasps = self.sample_trajs(shape_goal, shape_class=shape_class)
+        state = p.saveState()
+        for traj, grasp in zip(trajs, grasps): #make sure you can insert it as well
+            self.set_joints(traj[-1])
+            self.grasp=grasp
+            res =   self.sample_trajs(self.hole_goal, shape_class=shape_class, placing=True) 
+            if res is None:
+                continue
+            print("Found path that can be inserted as well")
+            break
+        p.restoreState(state)
         n_pts = 5
         mask = np.round(np.linspace(0,len(traj)-1, n_pts)).astype(np.int32)
         traj = np.array(traj)[mask] 
+        import ipdb; ipdb.set_trace()
         if visualize:
             self.visualize_traj(traj)
         self.attach_shape(shape_class, grasp)
@@ -284,7 +294,7 @@ class PegWorld():
             if original+sym < 3 and original+sym > -3:
                 ut.set_joint_position(self.robot, sample_joint, original+sym)
                 curr_pos  = ut.get_joint_position(self.robot, sample_joint)
-                ee_goal, grasp = self.get_closest_ee_goals(goal, shape_class=Rectangle, grasp_offset = self.grasp_offset)
+                ee_goal, grasp = self.get_closest_ee_goals(goal, shape_class=shape_class, grasp_offset = self.grasp_offset)
                 ee_goals.append(ee_goal)
                 grasps.append(grasp)
                 joint_angles.append(original+sym)
@@ -295,17 +305,21 @@ class PegWorld():
         working_traj = []
         working_joint_angles = []
         for ee_goal, grasp, joint_angle in zip(ee_goals, grasps, joint_angles):
-            grasp_traj = self.make_traj(ee_goal)
+            grasp_traj = self.make_traj(ee_goal, shape_class=shape_class)
             if grasp_traj is not None:
                 working_grasp.append(grasp) 
                 working_traj.append(grasp_traj)
                 working_joint_angles.append(joint_angle)
-        assert(len(working_traj) > 0)
+        if len(working_traj) == 0:
+            print("Could not find working traj. c to continue")
+            import ipdb; ipdb.set_trace()
+            return None
+        #assert(len(working_traj) > 0)
         #import ipdb; ipdb.set_trace()
         #distances = [(working_joint_angle-original)**2  for working_joint_angle in working_joint_angles]
         distances = [(working_joint_angle-original)**2  for working_joint_angle in working_joint_angles]
-        min_joint_angle_idxs = np.argmin(distances)
-        return working_traj[min_joint_angle_idxs], working_grasp[min_joint_angle_idxs]
+        min_joint_angle_idxs = np.argsort(distances)
+        return np.array(working_traj)[min_joint_angle_idxs], np.array(working_grasp)[min_joint_angle_idxs]
 
     def close(self):
         p.disconnect()
@@ -319,7 +333,9 @@ class PegWorld():
         else:
             np.save("custom_hole_goal.npy", hole_goal)
         import ipdb; ipdb.set_trace()
-        traj, grasp = self.sample_trajs(hole_goal, shape_class=Rectangle, placing=True) 
+        traj, grasp = self.sample_trajs(hole_goal, shape_class=shape_class, placing=True) 
+        traj=traj[0] #only need to take the first
+        grasp=grasp[0]
 
         if push_down:
             state = p.saveState()
@@ -332,7 +348,7 @@ class PegWorld():
             print(len(end_traj), "length end traj")
 
             p.restoreState(state)
-            traj += end_traj
+            traj = np.vstack([traj, end_traj])
         # end moving in that last bit
         if visualize:
             self.visualize_traj(traj)
@@ -345,6 +361,6 @@ class PegWorld():
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
     pw = PegWorld(visualize=True, handonly = False, load_previous=True)
-    pw.grasp_object(shape_class=Circle, visualize=True)
+    pw.grasp_object(shape_class=Rectangle, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
-    pw.place_object(shape_class=Circle, visualize=True)
+    pw.place_object(shape_class=Rectangle, visualize=True)

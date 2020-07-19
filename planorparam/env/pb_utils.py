@@ -2443,6 +2443,12 @@ def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disa
                 #print("Pairwise body collision", get_body_name(body1), get_body_name(body2))
                 if (body1, body2) in disabled_body_collisions or (body2, body1) in disabled_body_collisions or body1 ==body2:
                     continue
+                if isinstance(body1, tuple):
+                    if (body1[0], body2) in disabled_body_collisions or (body2, body1[0]) in disabled_body_collisions:
+                        continue
+                if isinstance(body2, tuple): 
+                    if (body1, body2[0]) in disabled_body_collisions or (body2[0], body1) in disabled_body_collisions :
+                        continue
                 set_joint_positions(body, joints, old_q)
                 [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
                 return True
@@ -2505,7 +2511,7 @@ def plan_joint_motion(body, joints, end_conf, obstacles=[], attachments=[],
     if not check_initial_end(start_conf, end_conf, collision_fn):
         return None
 
-    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn)
+    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
     #return plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn)
 
 def plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn, **kwargs):
