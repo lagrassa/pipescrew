@@ -28,7 +28,9 @@ class PegWorld():
         self.setup_robot()
         self.steps_taken = 0
         self.franka_tool_to_pb_link = 0.055 #measured empirically
+        ut.set_camera(90, -20, 1.5, target_position=(0,0.05,0))
         self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, square_loc = square_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal, load_previous=load_previous)
+
 
     """
     spawns a franka arm, eventually a FrankaArm object
@@ -161,7 +163,24 @@ class PegWorld():
 
         
 
-
+    def compute_IK(self, goal_pose, joints_to_plan_for, max_iter = 200):
+        for i in range(max_iter):
+            rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
+            rest = [ut.get_joint_positions(self.robot, ut.get_movable_joints(self.robot))]
+            lower = ut.get_min_limits(self.robot, joints_to_plan_for)
+            upper = ut.get_max_limits(self.robot, joints_to_plan_for)
+            lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+            upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+            random_jts = []
+            for i in range(7):
+                random_jts.append(np.random.uniform(low=lower[i], high=upper[i]))
+            self.set_joints(random_jts)
+            ranges = np.array(upper)-np.array(lower)#2*np.ones(len(joints_to_plan_for))
+            null_space = [lower, upper, ranges, [rest]]
+            null_space = None
+            end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
+            if end_conf is not None:
+                return end_conf
     """
     Trajectory from current pose to goal considering attachments
     Avoids obstacles. This is our planner. At the moment it does not consider any transition model uncertainty. Will update after experimental results
@@ -173,17 +192,8 @@ class PegWorld():
         #all of this only really makes sense with a full robot
         joints_to_plan_for = ut.get_movable_joints(self.robot)[:-2] #all but the fingers
 
-        rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
-        rest = [ut.get_joint_positions(self.robot, ut.get_movable_joints(self.robot))]
-        lower = ut.get_min_limits(self.robot, joints_to_plan_for)
-        upper = ut.get_max_limits(self.robot, joints_to_plan_for)
-        lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
-        upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
-        ranges = 2*np.ones(len(joints_to_plan_for))
-        null_space = [lower, upper, ranges, [rest]]
-        null_space = None
-       
-        end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
+        import ipdb; ipdb.set_trace()
+        end_conf = self.compute_IK(goal_pose, joints_to_plan_for)
         if end_conf is None:
             print("No IK solution found")
             p.restoreState(state) 
@@ -314,7 +324,6 @@ class PegWorld():
         working_traj = []
         working_joint_angles = []
         for ee_goal, grasp, joint_angle in zip(ee_goals, grasps, joint_angles):
-            import ipdb; ipdb.set_trace()
             grasp_traj = self.make_traj(ee_goal, shape_class=shape_class)
             if grasp_traj is not None:
                 working_grasp.append(grasp) 
@@ -379,7 +388,7 @@ class PegWorld():
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
     pw = PegWorld(visualize=True, handonly = False, load_previous=True)
-    shape_class = Square
+    shape_class = Rectangle
     pw.grasp_object(shape_class=shape_class, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
     pw.place_object(shape_class=shape_class, visualize=True)

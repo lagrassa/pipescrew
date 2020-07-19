@@ -3021,9 +3021,11 @@ def inverse_kinematics_helper(robot, link, target_pose, movable_joints=None, nul
     if null_space is not None:
         assert target_quat is not None
         lower, upper, ranges, rest = null_space
-
+        k = 0.1
+        jointDamping =  [k,k,k,k,k,k,k]
+        import ipdb; ipdb.set_trace()
         kinematic_conf = p.calculateInverseKinematics(robot, link, target_point,
-                                                      lowerLimits=lower, upperLimits=upper, jointRanges=ranges, restPoses=rest,
+                                                      lowerLimits=lower, upperLimits=upper, jointRanges=ranges, restPoses=rest,maxNumIterations=500,jointDamping=jointDamping,
                                                       physicsClientId=CLIENT)
     elif target_quat is None:
         #ikSolver = p.IK_DLS or p.IK_SDLS
@@ -3061,8 +3063,8 @@ def inverse_kinematics(robot, link, target_pose, movable_joints = None, max_iter
         if kinematic_conf is None:
             return None
         set_joint_positions(robot, movable_joints, kinematic_conf[:len(movable_joints)])
-        if null_space is not None:
-            null_space[-1] = [get_joint_positions(robot, movable_joints)]
+        #if null_space is not None:
+        #    null_space[-1] = [get_joint_positions(robot, movable_joints)]
         if is_pose_close(get_link_pose(robot, link), target_pose, **kwargs):
             lower_limits, upper_limits = get_custom_limits(robot, movable_joints, custom_limits)
             if all_between(lower_limits, kinematic_conf[:len(movable_joints)], upper_limits):
