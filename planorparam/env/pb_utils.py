@@ -2491,7 +2491,6 @@ def check_initial_end(start_conf, end_conf, collision_fn):
         return True#return False we assume that our initial configurations are always fine
     if collision_fn(end_conf):
         print("Warning: end configuration is in collision")
-        import ipdb; ipdb.set_trace()
         return False
     return True
 

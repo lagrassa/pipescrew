@@ -121,7 +121,7 @@ class Square:
     @staticmethod
     def tforms_to_pose(ids, tforms,goal=False):
         if goal:
-            shape_specific_ids = [18,19]
+            shape_specific_ids = [18,19, 20, 21]
         else:
             shape_specific_ids = [14,15,16,17]
 
@@ -137,7 +137,7 @@ class Square:
 
         if len(relevant_ids) == 4:
             translation = np.mean(np.vstack([T.translation for T in relevant_tforms]), axis=0)
-        corner_pairs = [(14,16), (15,17), (18,19)]
+        corner_pairs = [(14,16), (15,17), (18,20),(19,21)]
         for pair in corner_pairs:
             if pair[0] in relevant_ids and pair[1] in relevant_ids:
                 first_idx = ids.index(pair[0])

@@ -15,7 +15,7 @@ I am not focusing on making the dynamics of this at all realistic.
 """
 class PegWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], square_loc=None, board_loc = [[0.379, -0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
+            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], square_loc=None, board_loc = [[0.379+.04, -0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -68,7 +68,7 @@ class PegWorld():
         length = 0.3
         fake_board_thickness = 0.05
         height = 0.01
-        block_height = 0.01
+        block_height = 0.015
         self.hole_depth = block_height
         self.block_height = block_height
         self.board = ut.create_box(width, length, height+fake_board_thickness, color = (1,0.7,0,1)) 
@@ -101,7 +101,7 @@ class PegWorld():
             np.save("saves/circle_loc.npy", circle_loc)
             np.save("saves/obstacle_loc.npy", obstacle_loc)
             np.save("saves/hole_loc.npy", hole_goal)
-            np.save("saves/square_loc.npy", hole_goal)
+            np.save("saves/square_loc.npy", square_loc)
         
         if obstacle_loc is not None:
             self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
@@ -177,7 +177,9 @@ class PegWorld():
         rest = [ut.get_joint_positions(self.robot, ut.get_movable_joints(self.robot))]
         lower = ut.get_min_limits(self.robot, joints_to_plan_for)
         upper = ut.get_max_limits(self.robot, joints_to_plan_for)
-        ranges = 10*np.ones(len(joints_to_plan_for))
+        lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+        upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+        ranges = 2*np.ones(len(joints_to_plan_for))
         null_space = [lower, upper, ranges, [rest]]
         null_space = None
        
@@ -255,19 +257,26 @@ class PegWorld():
             self.set_joints(traj[-1])
             self.grasp=grasp
             res =   self.sample_trajs(self.hole_goal, shape_class=shape_class, placing=True) 
-            if res is None:
+            if res is None or len(res) == 0:
                 continue
             print("Found path that can be inserted as well")
+            insert_traj = res[0][0]
+            insert_traj = self.get_push_down_traj(insert_traj)
+            n_pts = min(20, len(insert_traj))
+            insert_traj = self.apply_mask(insert_traj)
             break
+
         p.restoreState(state)
-        n_pts = 5
-        mask = np.round(np.linspace(0,len(traj)-1, n_pts)).astype(np.int32)
-        traj = np.array(traj)[mask] 
-        import ipdb; ipdb.set_trace()
+        traj = self.apply_mask(traj, n_pts=5)
         if visualize:
             self.visualize_traj(traj)
         self.attach_shape(shape_class, grasp)
         assert(traj is not None)
+        return traj, insert_traj
+
+    def apply_mask(self, traj,n_pts = 10):
+        mask = np.round(np.linspace(0,len(traj)-1, n_pts)).astype(np.int32)
+        traj = np.array(traj)[mask] 
         return traj
 
     def sample_trajs(self, goal, shape_class=Rectangle, placing=False):
@@ -305,6 +314,7 @@ class PegWorld():
         working_traj = []
         working_joint_angles = []
         for ee_goal, grasp, joint_angle in zip(ee_goals, grasps, joint_angles):
+            import ipdb; ipdb.set_trace()
             grasp_traj = self.make_traj(ee_goal, shape_class=shape_class)
             if grasp_traj is not None:
                 working_grasp.append(grasp) 
@@ -332,35 +342,44 @@ class PegWorld():
             hole_goal[0][-1] = 0.03
         else:
             np.save("custom_hole_goal.npy", hole_goal)
+        res = self.sample_trajs(hole_goal, shape_class=shape_class, placing=True) 
         import ipdb; ipdb.set_trace()
-        traj, grasp = self.sample_trajs(hole_goal, shape_class=shape_class, placing=True) 
+        if res is None:
+            return res
+        traj, grasp = res
         traj=traj[0] #only need to take the first
         grasp=grasp[0]
 
         if push_down:
-            state = p.saveState()
-            #Move in that last bit
-            joint_vals = traj[-1]
-            ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
-            goal_pose = self.fk_rigidtransform(traj[-1], return_rt=False)
-            new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-0.7*self.hole_depth)
-            end_traj = self.make_traj((new_trans, goal_pose[1]),in_board = True)
-            print(len(end_traj), "length end traj")
-
-            p.restoreState(state)
-            traj = np.vstack([traj, end_traj])
+            traj = self.get_push_down_traj(traj)
         # end moving in that last bit
         if visualize:
             self.visualize_traj(traj)
-        n_pts = min(10, len(traj))
-        mask = np.round(np.linspace(0,len(traj)-1, n_pts)).astype(np.int32)
-        traj = np.array(traj)[mask] 
+        n_pts = min(20, len(traj))
+        traj = self.apply_mask(traj)
         assert(traj is not None)
         return traj
+
+    def get_push_down_traj(self, traj):
+        state = p.saveState()
+        #Move in that last bit
+        joint_vals = traj[-1]
+        ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
+        goal_pose = self.fk_rigidtransform(traj[-1], return_rt=False)
+        new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-0.7*self.hole_depth)
+        end_traj = self.make_traj((new_trans, goal_pose[1]),in_board = True)
+        if end_traj is None:
+            print("No push down")
+            return traj
+        p.restoreState(state)
+        traj = np.vstack([traj, end_traj])
+        return traj
+
 
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
     pw = PegWorld(visualize=True, handonly = False, load_previous=True)
-    pw.grasp_object(shape_class=Rectangle, visualize=True)
+    shape_class = Square
+    pw.grasp_object(shape_class=shape_class, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
-    pw.place_object(shape_class=Rectangle, visualize=True)
+    pw.place_object(shape_class=shape_class, visualize=True)
