@@ -15,7 +15,7 @@ I am not focusing on making the dynamics of this at all realistic.
 """
 class PegWorld():
     def __init__(self, visualize=False, bullet=None, handonly=False,load_previous=False,  rectangle_loc = [[0.55, -0.113, 0.016], [1, 0.   ,  0.   ,  0  ]],circle_loc = [[0.425, 0.101, 0.01 ],[1, -0.  ,  0.  ,  0  ]],
-            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.379, -0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
+            obstacle_loc = [[ 0.58172045, -0.04062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], square_loc=None, board_loc = [[0.379, -0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal =  [[0.55,0.08, 0], [1,0,0,0]]):
         if visualize:
             p.connect(p.GUI)
         else:
@@ -28,7 +28,7 @@ class PegWorld():
         self.setup_robot()
         self.steps_taken = 0
         self.franka_tool_to_pb_link = 0.055 #measured empirically
-        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal, load_previous=load_previous)
+        self.setup_workspace(rectangle_loc=rectangle_loc, circle_loc=circle_loc, board_loc=board_loc, square_loc = square_loc, obstacle_loc=obstacle_loc, hole_goal = hole_goal, load_previous=load_previous)
 
     """
     spawns a franka arm, eventually a FrankaArm object
@@ -56,7 +56,7 @@ class PegWorld():
     table with a hollow and solid cylinder on it
     """
     def setup_workspace(self, rectangle_loc = [[0.562, 0.003, 0.016], [1, 0.   ,  0.   ,  0   ]], load_previous=False, 
-            circle_loc = [[0.425, 0.101, 0.01 ],[1, 0.  ,  0.  ,  0  ]],
+            circle_loc = [[0.425, 0.101, 0.01 ],[1, 0.  ,  0.  ,  0  ]], square_loc =None,
             obstacle_loc = [[ 0.53172045, -0.03062703,  0.07507126], [1, -0.   ,  0.   ,  0   ]], board_loc = [[0.479, 0.0453, 0.013],[0.707, 0.707, 0.   , 0.   ]], hole_goal = [[0.55, 0.08, 0.0],[1,0,0,0]]):
         #RigidTransform(rotation=np.array([[-5.78152806e-02, -9.98327119e-01,  4.84639353e-07],
         #       [-9.98327425e-01,  5.78157598e-02,  3.97392158e-08],
@@ -72,21 +72,26 @@ class PegWorld():
         self.hole_depth = block_height
         self.block_height = block_height
         self.board = ut.create_box(width, length, height+fake_board_thickness, color = (1,0.7,0,1)) 
+        self.frontcamera_block = ut.create_box(0.4, 0.2, 0.4, color = (.2,0.7,0,0.2)) 
+        self.topcamera_block = ut.create_box(0.3, 0.08, 0.15, color = (1,0.7,0,0.2)) 
         board_loc[0][-1] -= 0.5*fake_board_thickness
         ut.set_pose(self.board, board_loc)
+        ut.set_point(self.frontcamera_block, (0.6+.15,0,0.1))
+        ut.set_point(self.topcamera_block, (0.5,0,0.95))
         #make circle
         #make rectangle
-        self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.5,0,0.1,1))
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
         board_z = 0.013+0.005
         #The perception z axis estimates are bad so let's use prior information to give it the right pose  
         rectangle_loc[0][-1] = board_z+0.5*block_height
         circle_loc[0][-1] = board_z+0.5*block_height
+        square_loc[0][-1] = board_z+0.5*block_height
         hole_goal[0][-1] = board_z+0.5*0.001
         if load_previous:
             rectangle_loc = np.load("saves/rectangle_loc.npy", allow_pickle=True)
             circle_loc = np.load("saves/circle_loc.npy", allow_pickle=True)
             obstacle_loc = np.load("saves/obstacle_loc.npy",allow_pickle=True)
+            square_loc = np.load("saves/square_loc.npy",allow_pickle=True)
             hole_goal = np.load("saves/hole_loc.npy", allow_pickle=True)
             for loc in [rectangle_loc, circle_loc, obstacle_loc, hole_goal]:
                 if loc is None or loc[0].any() is None:
@@ -96,6 +101,7 @@ class PegWorld():
             np.save("saves/circle_loc.npy", circle_loc)
             np.save("saves/obstacle_loc.npy", obstacle_loc)
             np.save("saves/hole_loc.npy", hole_goal)
+            np.save("saves/square_loc.npy", hole_goal)
         
         if obstacle_loc is not None:
             self.obstacle = ut.create_box(0.08, 0.04, 0.1, color = (0.5,0.5,0.5,1))
@@ -110,14 +116,23 @@ class PegWorld():
         else:
             self.circle = None
         if rectangle_loc is not None:
+            self.rectangle =  ut.create_box(0.092, 0.069, block_height, color=(0.3,0,0.1,1))
             ut.set_pose(self.rectangle, rectangle_loc)
+        else:
+            self.rectangle=None
+        if square_loc is not None:
+            import ipdb; ipdb.set_trace()
+            self.square = ut.create_box(0.072, 0.072, block_height, color=(0.8, 0, 0.1, 1)) 
+            ut.set_pose(self.square, square_loc)
+            
         self.hole_goal = hole_goal
 
         self.shape_name_to_shape = {}
-        self.shape_name_to_shape[Obstacle] = self.obstacle
+        self.shape_name_to_shape[Obstacle.__name__] = self.obstacle
         ut.set_pose(self.hole, hole_goal)
-        self.shape_name_to_shape[Circle] = self.circle
-        self.shape_name_to_shape[Rectangle] = self.rectangle
+        self.shape_name_to_shape[Circle.__name__] = self.circle
+        self.shape_name_to_shape[Rectangle.__name__] = self.rectangle
+        self.shape_name_to_shape[Square.__name__] = self.square
         input("workspace okay?")
         p.saveBullet("curr_state.bt")
 
@@ -176,26 +191,26 @@ class PegWorld():
         p.restoreState(state)
         #for attachment in self.in_hand:
         #    attachment.assign()
-        obstacles = [obs for obs in [self.obstacle, self.circle] if obs is not None]
+        obstacles = [obs for obs in [self.obstacle, self.square, self.circle, self.topcamera_block, self.frontcamera_block] if obs is not None and obs != self.shape_name_to_shape[shape_class.__name__]]
         if not in_board:
             obstacles.append(self.board)
-        disabled_collisions =  []
+        disabled_body_collisions =  [(self.board, self.rectangle), (self.hole, self.rectangle)]
         #if len(self.in_hand) == 1:
         #    disabled_collisions.append((self.in_hand[0].child, self.board))
         #    disabled_collisions.append((self.board, self.in_hand[0].child))
         traj = ut.plan_joint_motion(self.robot, joints_to_plan_for, end_conf, obstacles=obstacles, attachments=self.in_hand,
-                      self_collisions=True,
-                      weights=None, resolutions=None, smooth=100, restarts=5, iterations=100)
+                      self_collisions=True, disabled_body_collisions=disabled_body_collisions,
+                      weights=None, resolutions=None, smooth=100, restarts=20, iterations=100)
         
         p.restoreState(state)
         return traj
     def attach_shape(self, shape_name, grasp_pose):
         self.grasp = grasp_pose
         world_from_robot = ut.get_link_pose(self.robot, self.grasp_joint)
-        world_from_obj = ut.get_link_pose(self.shape_name_to_shape[shape_name], -1)
+        world_from_obj = ut.get_link_pose(self.shape_name_to_shape[shape_name.__name__], -1)
         grasp_quat = ut.multiply(ut.invert(world_from_robot), world_from_obj)[1]
         self.grasp = (self.grasp[0], grasp_quat)
-        attachment = ut.Attachment(self.robot, self.grasp_joint, self.grasp, self.shape_name_to_shape[shape_name])
+        attachment = ut.Attachment(self.robot, self.grasp_joint, self.grasp, self.shape_name_to_shape[shape_name.__name__])
         new_obj_pose = np.array(p.getLinkState(self.robot, self.grasp_joint)[0])+self.grasp[0]
         #ut.set_point(self.shape_name_to_shape[shape_name], new_obj_pose)
         attachment.assign()
@@ -234,14 +249,14 @@ class PegWorld():
     Collision-free trajectory  to place object in hole
     """
     def grasp_object(self, shape_class=Rectangle, visualize=False):
-        shape_goal = p.getBasePositionAndOrientation(self.rectangle)
+        shape_goal = p.getBasePositionAndOrientation(self.shape_name_to_shape[shape_class.__name__])
         traj, grasp = self.sample_trajs(shape_goal, shape_class=shape_class)
         n_pts = 5
         mask = np.round(np.linspace(0,len(traj)-1, n_pts)).astype(np.int32)
         traj = np.array(traj)[mask] 
         if visualize:
             self.visualize_traj(traj)
-        self.attach_shape(Rectangle, grasp)
+        self.attach_shape(shape_class, grasp)
         assert(traj is not None)
         return traj
 
@@ -330,6 +345,6 @@ class PegWorld():
 if __name__ == "__main__":
     #pw = PegWorld( visualize=False, handonly=False)
     pw = PegWorld(visualize=True, handonly = False, load_previous=True)
-    pw.grasp_object(shape_class=Rectangle, visualize=True)
+    pw.grasp_object(shape_class=Circle, visualize=True)
     #pw.visualize_points(np.load("../real_robot/data/bad_odel_states.npy", allow_pickle=True)[:,0:3])
-    pw.place_object(shape_class=Rectangle, visualize=True)
+    pw.place_object(shape_class=Circle, visualize=True)

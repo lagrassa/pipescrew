@@ -4,7 +4,7 @@ import sys
 import scipy.stats
 mvn = scipy.stats.multivariate_normal
 import os
-from shapes import Circle, Rectangle, Obstacle
+from shapes import Circle, Rectangle, Obstacle, Square
 import rospy
 from pyquaternion import Quaternion
 import cv_bridge
@@ -32,7 +32,7 @@ from frankapy import FrankaArm
 fa = FrankaArm()
 
 class Robot():
-    def __init__(self, visualize=False, setup_pb=True, data_folder="test"):
+    def __init__(self, visualize=False, setup_pb=True, data_folder="test", shape_class=Rectangle):
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
@@ -51,7 +51,7 @@ class Robot():
         self.visualize=visualize
         self.setup_perception()
         if setup_pb:
-            self.setup_pbworld(visualize=visualize)
+            self.setup_pbworld(visualize=visualize, shape_class=shape_class)
     def setup_stilde_training_data(self, data_folder):
         good_model_path = "data/"+data_folder+"/good_model_states.npy"
         bad_model_path = "data/"+data_folder+"/bad_model_states.npy"
@@ -63,14 +63,16 @@ class Robot():
             self.bad_model_states = np.load(bad_model_path)
         else:
             self.bad_model_states = None
-    def setup_pbworld(self, visualize):
+    def setup_pbworld(self, visualize, shape_class=Rectangle):
         board_loc = [[0.379,-0.0453,0.013],[0.707,0.707,0,0]]
         #import ipdb; ipdb.set_trace()
         circle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Circle, goal=False))
         obstacle_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Obstacle, goal=False))
+        square_loc = rigid_transform_to_pb_pose(self.detect_ar_world_pos(straighten=True, shape_class = Square, goal=False))
         rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
-        hole_goal = rigid_transform_to_pb_pose(self.get_shape_goal_location(Rectangle))
-        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, hole_goal = hole_goal, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, visualize=visualize)
+        import ipdb; ipdb.set_trace()
+        hole_goal = rigid_transform_to_pb_pose(self.get_shape_goal_location(shape_class))
+        self.pb_world = PegWorld(rectangle_loc=rectangle_loc, hole_goal = hole_goal, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, square_loc=square_loc, visualize=visualize)
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
@@ -139,7 +141,7 @@ class Robot():
     def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
-        detections = self.april.detect(self.sensor, self.intr, vis=self.cfg['vis_detect'])
+        detections = self.april.detect(self.sensor, self.intr, self.cfg['vis_detect'])
 
         detected_ids = []
         for new_detection in detections:
@@ -158,7 +160,7 @@ class Robot():
        if grasp_offset is None:
            grasp_offset = self.grasp_offset
        fa.open_gripper()
-       path = self.pb_world.grasp_object(visualize=True)
+       path = self.pb_world.grasp_object(shape_class=shape_type, visualize=True)
        res =  self.follow_traj(path, monitor_execution=monitor_execution, traj_type="joint", dt=3.5, training=training, data_folder=None)
        fa.goto_gripper(self.grip_width, grasp=True)
        return res
@@ -233,7 +235,7 @@ class Robot():
             sample[2] += 0.02 #keep it out of the board
             sample[2] -= self.grasp_offset #keep it out of the board
             pb_sample = (sample[0:3], sample[3:])
-            place_traj = self.pb_world.place_object(hole_goal=pb_sample, shape_class=Rectangle, visualize=True, push_down = False)
+            place_traj = self.pb_world.place_object(hole_goal=pb_sample, shape_class=shape_class, visualize=True, push_down = False)
             res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
 
         else:
@@ -253,15 +255,18 @@ class Robot():
     uses the model to put the shape into the corresponding hole
     assumes the shape being inserted is a Rectangle
     """
-    def model_based_insert_shape(self, T_tool_world, monitor_execution=True, training=True, use_patch=False, data_folder="test"):
+    def model_based_insert_shape(self, T_tool_world, monitor_execution=True, training=True, use_patch=False, data_folder="test", shape_class=Rectangle):
         hole_goal = rigid_transform_to_pb_pose(T_tool_world)
-        place_traj = self.pb_world.place_object(shape_class=Rectangle, visualize=True)
-        res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, use_patch=use_patch, monitor_execution=monitor_execution, traj_type="joint", dt = 3, training=training, data_folder=data_folder)
+        place_traj = self.pb_world.place_object(shape_class=shape_class, visualize=True)
+        total_time = 7
+        dt = total_time/(len(place_traj))
+        res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, use_patch=use_patch, monitor_execution=monitor_execution, traj_type="joint", dt = dt, training=training, data_folder=data_folder)
+
         if res == "expected_good":
             down_pose = fa.get_pose()
             down_amount = 0.02
             down_pose.translation[-1] -= down_amount
-            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 2, training=training, data_folder=data_folder)
+            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 1, training=training, data_folder=data_folder)
             
         else:
             return res
@@ -281,7 +286,7 @@ class Robot():
             T_tool_world.from_frame = "franka_tool"
             T_tool_world.to_frame = "world"
         if use_planner:
-            return self.model_based_insert_shape(T_tool_world, training=training, use_patch=use_patch)
+            return self.model_based_insert_shape(T_tool_world, training=training, use_patch=use_patch, shape_class=self.holding_type)
         #find corresponding hole and orientation
         start = fa.get_pose()
         #set rotation to closest rotation in symmetry to pose
@@ -366,6 +371,8 @@ class Robot():
     """
     def follow_traj(self, path, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain = 300, monitor_execution=True, traj_type = "cart", dt = 2, training=True, use_patch=False, data_folder="test"):
         cart_poses = []
+        monitor_execution = False
+        print("debug, not monitoring execution")
         if monitor_execution and use_patch:
             for pt in path:
                 if traj_type != "cart":
@@ -459,7 +466,7 @@ class Robot():
 
     def get_shape_goal_location(self, shape_type):
         if shape_type not in self.shape_to_goal_loc.keys():
-            goal_loc = self.detect_ar_world_pos(shape_class = Rectangle, goal=True, straighten=True)
+            goal_loc = self.detect_ar_world_pos(shape_class = shape_type, goal=True, straighten=True)
             self.shape_to_goal_loc[shape_type] = goal_loc
         return self.shape_to_goal_loc[shape_type]
 
@@ -602,10 +609,11 @@ def straighten_transform(rt):
 def run_insert_exp(robot, prefix, use_patch=False, training=True, use_planner=False, data_folder="test", shape_class = Rectangle):
     fa.open_gripper()
     fa.reset_joints()
-    input("reset scene. Ready?")
-    shape_center = robot.get_shape_location(shape_class=shape_class)
-    robot.setup_pbworld(visualize=True)
-    robot.grasp_shape(shape_center, shape_class, use_planner=use_planner, monitor_execution=use_patch, training=False) #not training for this part
+    import ipdb; ipdb.set_trace()
+    _ = input("reset scene. Ready?")
+    shape_center = robot.get_shape_location(shape_class)
+    robot.setup_pbworld(visualize=True, shape_class=shape_class)
+    robot.grasp_shape(shape_center, shape_class, use_planner=use_planner, monitor_execution=False, training=False) #not training for this part
     start_time = time.time()
     result = robot.insert_shape(use_planner=True, training=training, use_patch=use_patch)
     print("time elapsed", time.time()-start_time)
@@ -642,11 +650,11 @@ if __name__ == "__main__":
     fa.open_gripper()
     fa.reset_joints()
     data_folder = sys.argv[1]
-    shape_class = Rectangle
+    shape_class = Square
     if not os.path.exists("data/"+data_folder):
         os.makedir("data/"+data_folder)
 
-    robot = Robot(visualize=True, setup_pb=False)
+    robot = Robot(visualize=True, setup_pb=False, shape_class=shape_class)
     #robot.modelfree()
     #import ipdb; ipdb.set_trace()
     #actions, images, ees = robot.keyboard_teleop()

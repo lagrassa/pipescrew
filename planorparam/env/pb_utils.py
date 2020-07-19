@@ -2405,7 +2405,7 @@ def get_self_link_pairs(body, joints, disabled_collisions=set(), only_moving=Tru
 
 
 def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions,
-                     custom_limits={}, **kwargs):
+                     custom_limits={},disabled_body_collisions = [], **kwargs):
     # TODO: convert most of these to keyword arguments
     check_link_pairs = get_self_link_pairs(body, joints, disabled_collisions) \
         if self_collisions else []
@@ -2441,6 +2441,8 @@ def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disa
             if pairwise_collision(body1, body2, **kwargs):
                 #print("Pairwise body collision", body1, body2)
                 #print("Pairwise body collision", get_body_name(body1), get_body_name(body2))
+                if (body1, body2) in disabled_body_collisions or (body2, body1) in disabled_body_collisions or body1 ==body2:
+                    continue
                 set_joint_positions(body, joints, old_q)
                 [set_pose(attachment.child, pose) for pose, attachment in zip(old_poses, attachments)]
                 return True
@@ -2479,30 +2481,31 @@ def plan_direct_joint_motion(body, joints, end_conf, **kwargs):
 
 def check_initial_end(start_conf, end_conf, collision_fn):
     if collision_fn(start_conf):
-        import ipdb; ipdb.set_trace()
         print("Warning: initial configuration is in collision")
-        return False
+        return True#return False we assume that our initial configurations are always fine
     if collision_fn(end_conf):
         print("Warning: end configuration is in collision")
+        import ipdb; ipdb.set_trace()
         return False
     return True
 
 def plan_joint_motion(body, joints, end_conf, obstacles=[], attachments=[],
-                      self_collisions=True, disabled_collisions=set(),
+                      self_collisions=True, disabled_collisions=set(), disabled_body_collisions=[],
                       weights=None, resolutions=None, max_distance=MAX_DISTANCE, custom_limits={}, **kwargs):
 
     assert len(joints) == len(end_conf)
     sample_fn = get_sample_fn(body, joints, custom_limits=custom_limits)
     distance_fn = get_distance_fn(body, joints, weights=weights)
     extend_fn = get_extend_fn(body, joints, resolutions=resolutions)
-    collision_fn = get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions,
+    collision_fn = get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions, disabled_body_collisions=disabled_body_collisions,
                                     custom_limits=custom_limits, max_distance=max_distance)
 
     start_conf = get_joint_positions(body, joints)
 
     if not check_initial_end(start_conf, end_conf, collision_fn):
         return None
-    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
+
+    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn)
     #return plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn)
 
 def plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn, **kwargs):
@@ -3059,8 +3062,6 @@ def inverse_kinematics(robot, link, target_pose, movable_joints = None, max_iter
             lower_limits, upper_limits = get_custom_limits(robot, movable_joints, custom_limits)
             if all_between(lower_limits, kinematic_conf[:len(movable_joints)], upper_limits):
                 break
-            else:
-                print("solution found but violates joint limits")
     else:
         return None
     return kinematic_conf
