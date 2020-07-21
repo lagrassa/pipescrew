@@ -1,7 +1,7 @@
 import numpy as np
 import modelfree.processimgs as processimgs
 from PIL import Image
-
+import os
 from skimage.color import rgb2hsv
 from modelfree.ILPolicy import ILPolicy, process_action_data
 from utils.transformations import *
@@ -20,33 +20,44 @@ def get_deltas(later_ees, first_ees):
     return np.hstack([trans, np.vstack(quats)])
 
 
-def test_behaviour_cloning():
-    camera_data_raw = np.load("data/0kinect_data.npy")
-    ee_data = np.load("data/0ee_data.npy")
-    action_data = np.load("data/0actions.npy")
+def test_behaviour_cloning(data_folder,shape_class, regularize=True):
+    camera_data_list = []
+    ee_data_list = [] 
+    action_data_list = []
+    #camera_data_raw = np.load("data/0kinect_data.npy")
+    #ee_data = np.load("data/0ee_data.npy")
+    #action_data = np.load("data/0actions.npy")
     #n_waypoints = 10
-    for i in range(1,2):
-        new_raw_camera_data = np.load("data/"+str(i)+"kinect_data.npy")
-        #mask = np.round(np.linspace(0,new_raw_camera_data.shape[0]-1,n_waypoints)).astype(np.int32)
-        #new_raw_camera_data = new_raw_camera_data[mask]
-        camera_data_raw = np.vstack([camera_data_raw, new_raw_camera_data])
-        new_ee_data = np.load("data/"+str(i)+"ee_data.npy")
-        new_action_data = np.load("data/"+str(i)+"actions.npy")
-        #new_ee_data = new_ee_data[mask]
-        ee_data = np.vstack([ee_data, new_ee_data])
-        action_data = np.vstack([action_data, new_action_data])
-
-    camera_data = processimgs.process_raw_camera_data(camera_data_raw)
-    image = camera_data[0,:,:,:]
-    camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2] *camera_data.shape[3]))
-    my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[2])
-    my_vae.load_weights("test_weights.h5y")
+    for fn in os.listdir("data/"+data_folder+"/"):
+        if "kinect_data" in fn:
+            new_raw_camera_data = np.load("data/"+data_folder+"/"+fn)
+            #mask = np.round(np.linspace(0,new_raw_camera_data.shape[0]-1,n_waypoints)).astype(np.int32)
+            #new_raw_camera_data = new_raw_camera_data[mask]
+            new_camera_data_processed = processimgs.process_raw_camera_data(new_raw_camera_data, shape_class)
+            camera_data_list.append(new_camera_data_processed)
+        elif "ee_data" in fn:
+            new_ee_data = np.load("data/"+data_folder+"/"+fn)
+            ee_data_list.append(new_ee_data)
+        elif "actions" in fn:
+            new_action_data = np.load("data/"+data_folder+"/"+fn)
+            action_data_list.append(new_action_data)
+    camera_data = np.concatenate(camera_data_list,axis=0)
+    ee_data = np.concatenate(ee_data_list, axis=0)
+    action_data = np.concatenate(action_data_list, axis=0)
+    if regularize:
+        camera_data += np.random.uniform(low=-10, high=10, size=camera_data.shape)
+        ee_data += np.random.uniform(low=-0.005, high=0.005, size=ee_data.shape)
+        action_data += np.random.uniform(low=-0.005, high=0.005, size=action_data.shape)
+    image = camera_data[0,:,:]
+    camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2]))
+    my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = 1)
+    my_vae.load_weights("models/"+data_folder+"/test_weights.h5y")
     encoded_camera_data = encoder.predict(camera_data)[0]
     #ee_data = process_action_data(ee_data)
     ee_deltas = action_data #get_deltas(ee_data[1:],ee_data[:-1]) #delta from last
     input_data = np.hstack([encoded_camera_data, ee_data])
-    il_policy = ILPolicy(input_data, ee_deltas)
-    il_policy.train_model(input_data, ee_deltas, n_epochs = 10000, validation_split=0.1 )
+    il_policy = ILPolicy(input_data, ee_deltas, model_type="forest")
+    il_policy.train_model(input_data, ee_deltas, n_epochs = 1000, validation_split=0.1 )
     thresh = 0.02
     errors = []
     angle_errors = []
@@ -68,6 +79,6 @@ def test_behaviour_cloning():
     assert(np.max(errors) < 0.1)
     assert(np.mean(errors) < 0.015)
     il_policy.save_model("models/ilpolicy.h5y")
-
-
-test_behaviour_cloning()
+shape_class="Square"
+data_folder = "square5"
+test_behaviour_cloning(data_folder, shape_class)

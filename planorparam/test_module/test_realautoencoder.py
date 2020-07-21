@@ -1,7 +1,16 @@
 from modelfree import vae, processimgs
+import os
 import numpy as np
 from PIL import Image
 from skimage.color import rgb2hsv
+from skimage.io import imread, imsave
+import matplotlib.pyplot as plt
+from skimage import transform
+from skimage.transform import rotate, AffineTransform
+from skimage.util import random_noise
+from skimage.filters import gaussian
+from scipy import ndimage
+
 
 def test_one_image():
     import imageio
@@ -20,31 +29,47 @@ def test_one_image():
     vae.train_vae(my_vae, data, n_train, inputs, outputs, output_tensors)
     encoded = encoder(data)
 
-def test_kinect_ims():
-    camera_data_raw = np.load("data/0kinect_data.npy")
-    for i in range(1,12):
-        camera_data_raw = np.vstack([camera_data_raw, np.load("data/"+str(i)+"kinect_data.npy")])
+def test_kinect_ims(data_folder, shape_class, augment =True):
+    data_list = []
+    for fn in os.listdir("data/"+data_folder+"/"):
+        if "kinect_data" in fn:
+            new_data = np.load("data/"+data_folder+"/"+fn)
+            new_data_processed = processimgs.process_raw_camera_data(new_data, shape_class)      
+            data_list.append(new_data_processed)
+    camera_data = np.concatenate(data_list, axis=0)
+    if augment:
+        num_rotations = 10
+        num_shear = 10
+        num_color = 10
+        num_random_noise = 10
+        new_camera_data = camera_data.copy()
+        for im in camera_data:
+            for _ in range(num_rotations):
+                new_im = rotate(im, angle=np.random.uniform(low=-9,high=9))
+                new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
+            for _ in range(num_shear):
+                tf = AffineTransform(shear=np.random.uniform(low=-0.5, high=0.5))
+                new_im = transform.warp(im, tf, order=1, preserve_range=True, mode='wrap')
+                new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
+            for _ in range(num_random_noise):
+                new_im  = 255*random_noise(im/255., var=0.01**2)
+                new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
+            for _ in range(num_color):
+                new_im = im*np.random.uniform(low=0.9, high=1.1)
+                new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
+                new_im = im + np.random.uniform(low=-0.1*255, high=0.1*255)
+                new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
+        camera_data = new_camera_data
+    image = camera_data[0,:,:]
+    import ipdb; ipdb.set_trace() 
+    camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2]))
+    my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = 1)
+    n_train = 0.1
+    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 50)
 
-    #width = 40
-    #height = 50
-    #camera_data = np.zeros((camera_data_raw.shape[0], height,width, 1))
-    #for i in range(camera_data_raw.shape[0]):
-    #    new_im = Image.fromarray(camera_data_raw[i,275:440,520:700,0]).resize((width, height))
-    #    #import ipdb; ipdb.set_trace()
-    #    #new_im = rgb2hsv(new_im[:,:,0:3])
-    #    #new_im = rgb2hsv(new_im)
-    #    #new_im = new_im[:,:,0]
-    #    new_im = np.array(new_im)
-    #    new_im = new_im.reshape(new_im.shape+(1,))
-    #    camera_data[i,:,:,:] = new_im
-    camera_data = processimgs.process_raw_camera_data(camera_data_raw)
-    image = camera_data[0,:,:,:]
-    camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2] *camera_data.shape[3]))
-    my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = image.shape[-1])
-    n_train = 0.03
-    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 1000)
-
-    my_vae.save_weights("test_weights.h5y")
-test_kinect_ims()
+    my_vae.save_weights("models/"+data_folder+"/test_weights.h5y")
+shape_class = 'Square'
+data_folder='square5'
+test_kinect_ims(data_folder, shape_class)
 
 
