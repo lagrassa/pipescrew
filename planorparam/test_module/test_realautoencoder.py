@@ -60,16 +60,19 @@ def test_kinect_ims(data_folder, shape_class, augment =True):
                 new_im = im + np.random.uniform(low=-0.1*255, high=0.1*255)
                 new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
         camera_data = new_camera_data
+     
     image = camera_data[0,:,:]
-    import ipdb; ipdb.set_trace() 
     camera_data = camera_data.reshape((camera_data.shape[0], camera_data.shape[1]*camera_data.shape[2]))
+    idxs = list(range(camera_data.shape[0]))
+    np.random.shuffle(idxs)
+    camera_data = camera_data[idxs]
     my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = 1)
     n_train = 0.1
-    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 50)
+    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 20)
 
     my_vae.save_weights("models/"+data_folder+"/test_weights.h5y")
-shape_class = 'Square'
-data_folder='square5'
+shape_class = 'Rectangle'
+data_folder='rectangle20'
 test_kinect_ims(data_folder, shape_class)
 
 

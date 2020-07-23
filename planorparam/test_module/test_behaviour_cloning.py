@@ -79,6 +79,9 @@ def test_behaviour_cloning(data_folder,shape_class, regularize=True):
     assert(np.max(errors) < 0.1)
     assert(np.mean(errors) < 0.015)
     il_policy.save_model("models/ilpolicy.h5y")
-shape_class="Square"
-data_folder = "square5"
-test_behaviour_cloning(data_folder, shape_class)
+    return il_policy
+
+if __name__ == "__main__":
+    shape_class="Rectangle"
+    data_folder = "rectangle20"
+    test_behaviour_cloning(data_folder, shape_class)

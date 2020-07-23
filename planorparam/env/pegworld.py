@@ -20,7 +20,6 @@ class PegWorld():
             p.connect(p.GUI)
         else:
             p.connect(p.DIRECT)
-        
         #for testing
         self.handonly = handonly
         p.setGravity(0,0,-9.8)
@@ -76,10 +75,12 @@ class PegWorld():
         self.board = ut.create_box(width, length, height+fake_board_thickness, color = (1,0.7,0,1)) 
         self.frontcamera_block = ut.create_box(0.4, 0.2, 0.4, color = (.2,0.7,0,0.2)) 
         self.topcamera_block = ut.create_box(0.3, 0.08, 0.15, color = (1,0.7,0,0.2)) 
+        self.controlpc_block = ut.create_box(0.4, 0.4, 0.42, color = (1,0.7,0,0.2)) 
         board_loc[0][-1] -= 0.5*fake_board_thickness
         ut.set_pose(self.board, board_loc)
         ut.set_point(self.frontcamera_block, (0.6+.15,0,0.1))
         ut.set_point(self.topcamera_block, (0.5,0,0.95))
+        ut.set_point(self.controlpc_block, (-0.1,0.45,0.2))
         #make circle
         #make rectangle
         self.hole = ut.create_box(0.092, 0.069, 0.001, color = (0.1,0,0,1))
@@ -163,7 +164,9 @@ class PegWorld():
 
         
 
-    def compute_IK(self, goal_pose, joints_to_plan_for, max_iter = 200):
+    def compute_IK(self, goal_pose, joints_to_plan_for, cur_pose=None, max_iter = 50):
+        solutions = []
+        good_num_solutions = 2
         for i in range(max_iter):
             rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
             rest = [ut.get_joint_positions(self.robot, ut.get_movable_joints(self.robot))]
@@ -171,16 +174,19 @@ class PegWorld():
             upper = ut.get_max_limits(self.robot, joints_to_plan_for)
             lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
             upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+            null_space = None
+            end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
             random_jts = []
             for i in range(7):
                 random_jts.append(np.random.uniform(low=lower[i], high=upper[i]))
             self.set_joints(random_jts)
-            ranges = np.array(upper)-np.array(lower)#2*np.ones(len(joints_to_plan_for))
-            null_space = [lower, upper, ranges, [rest]]
-            null_space = None
-            end_conf = ut.inverse_kinematics(self.robot, self.grasp_joint, goal_pose, movable_joints=joints_to_plan_for, null_space=null_space) #end conf to be in the goal loc
+            #ranges = np.array(upper)-np.array(lower)#2*np.ones(len(joints_to_plan_for))
+            #null_space = [lower, upper, ranges, [rest]]
             if end_conf is not None:
-                return end_conf
+                solutions.append(end_conf)
+            if len(solutions) > good_num_solutions or cur_pose is None:
+                break
+        return solutions[np.argmin([np.linalg.norm(np.array(cur_pose)-np.array(solution[:-2])) for solution in solutions])]
     """
     Trajectory from current pose to goal considering attachments
     Avoids obstacles. This is our planner. At the moment it does not consider any transition model uncertainty. Will update after experimental results
@@ -192,8 +198,7 @@ class PegWorld():
         #all of this only really makes sense with a full robot
         joints_to_plan_for = ut.get_movable_joints(self.robot)[:-2] #all but the fingers
 
-        import ipdb; ipdb.set_trace()
-        end_conf = self.compute_IK(goal_pose, joints_to_plan_for)
+        end_conf = self.compute_IK(goal_pose, joints_to_plan_for, cur_pose = ut.get_joint_positions(self.robot, joints_to_plan_for) )
         if end_conf is None:
             print("No IK solution found")
             p.restoreState(state) 
@@ -205,7 +210,8 @@ class PegWorld():
         obstacles = [obs for obs in [self.obstacle, self.square, self.circle, self.topcamera_block, self.frontcamera_block] if obs is not None and obs != self.shape_name_to_shape[shape_class.__name__]]
         if not in_board:
             obstacles.append(self.board)
-        disabled_body_collisions =  [(self.board, self.rectangle), (self.hole, self.rectangle),(self.board, self.square),(self.robot, self.shape_name_to_shape[shape_class.__name__])]
+        #disabled_body_collisions =  [(self.board, self.rectangle), (self.hole, self.rectangle),(self.board, self.square),(self.robot, self.shape_name_to_shape[shape_class.__name__])]
+        disabled_body_collisions =  [(self.hole, self.rectangle),(self.robot, self.shape_name_to_shape[shape_class.__name__])]
         #if len(self.in_hand) == 1:
         #    disabled_collisions.append((self.in_hand[0].child, self.board))
         #    disabled_collisions.append((self.board, self.in_hand[0].child))
@@ -271,9 +277,9 @@ class PegWorld():
                 continue
             print("Found path that can be inserted as well")
             insert_traj = res[0][0]
-            insert_traj = self.get_push_down_traj(insert_traj)
+            insert_traj = self.get_push_down_traj(insert_traj, shape_class=shape_class)
             n_pts = min(20, len(insert_traj))
-            insert_traj = self.apply_mask(insert_traj)
+            insert_traj = self.apply_mask(insert_traj, n_pts = n_pts)
             break
 
         p.restoreState(state)
@@ -304,7 +310,7 @@ class PegWorld():
                 symmetries.append(sampled_angle)
         else:
             symmetries =  shape_class.grasp_symmetries()
-        self.grasp_offset = 0.005+self.franka_tool_to_pb_link
+        self.grasp_offset = 0.003+self.franka_tool_to_pb_link #originally 0.005
         #All of this is to make sure the grasps are within joint limits 
         ee_goals = []
         grasps = []
@@ -331,7 +337,6 @@ class PegWorld():
                 working_joint_angles.append(joint_angle)
         if len(working_traj) == 0:
             print("Could not find working traj. c to continue")
-            import ipdb; ipdb.set_trace()
             return None
         #assert(len(working_traj) > 0)
         #import ipdb; ipdb.set_trace()
@@ -351,8 +356,8 @@ class PegWorld():
             hole_goal[0][-1] = 0.03
         else:
             np.save("custom_hole_goal.npy", hole_goal)
+        hole_goal[0][-1] += 0.002
         res = self.sample_trajs(hole_goal, shape_class=shape_class, placing=True) 
-        import ipdb; ipdb.set_trace()
         if res is None:
             return res
         traj, grasp = res
@@ -360,7 +365,7 @@ class PegWorld():
         grasp=grasp[0]
 
         if push_down:
-            traj = self.get_push_down_traj(traj)
+            traj = self.get_push_down_traj(traj, shape_class=shape_class)
         # end moving in that last bit
         if visualize:
             self.visualize_traj(traj)
@@ -369,15 +374,16 @@ class PegWorld():
         assert(traj is not None)
         return traj
 
-    def get_push_down_traj(self, traj):
+    def get_push_down_traj(self, traj, shape_class=Rectangle):
         state = p.saveState()
         #Move in that last bit
         joint_vals = traj[-1]
         ut.set_joint_positions(self.robot, ut.get_movable_joints(self.robot)[:len(joint_vals)], joint_vals)
         goal_pose = self.fk_rigidtransform(traj[-1], return_rt=False)
-        new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-0.7*self.hole_depth)
-        end_traj = self.make_traj((new_trans, goal_pose[1]),in_board = True)
+        new_trans = (goal_pose[0][0], goal_pose[0][1], goal_pose[0][2]-1*self.hole_depth)
+        end_traj = self.make_traj((new_trans, goal_pose[1]),shape_class=shape_class, in_board = True)
         if end_traj is None:
+            import ipdb; ipdb.set_trace()
             print("No push down")
             return traj
         p.restoreState(state)

@@ -72,7 +72,7 @@ class ILPolicy:
                             'min_samples_split': min_samples_split,
                             'min_samples_leaf': min_samples_leaf,
                             'bootstrap': bootstrap}
-                rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 70, cv = 3, verbose=1, random_state=42, n_jobs = 12)# Fit the random search model
+                rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 12, cv = 3, verbose=1, random_state=42, n_jobs = 12)# Fit the random search model 70 works
                 rf_random.fit(observation_data,action_data) 
                 self.model=rf_random
             else:

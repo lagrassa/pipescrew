@@ -78,7 +78,7 @@ def make_dsae(image_size_x=None, image_size_y=None, n_channels=3):
     #x = kl.Lambda(lambda y: tf.contrib.layers.spatial_softmax(y))(x)
     x = kl.Flatten()(x)
     #x = kl.Dropout(0.5)(x)
-    x = Dense(2)(x)
+    x = Dense(5)(x)
     x = Dense(latent_dim)(x)
     #x = kl.Dropout(0.2)(x)
     x = Dense(image_size_x*image_size_y)(x)

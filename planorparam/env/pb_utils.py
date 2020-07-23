@@ -3023,7 +3023,6 @@ def inverse_kinematics_helper(robot, link, target_pose, movable_joints=None, nul
         lower, upper, ranges, rest = null_space
         k = 0.1
         jointDamping =  [k,k,k,k,k,k,k]
-        import ipdb; ipdb.set_trace()
         kinematic_conf = p.calculateInverseKinematics(robot, link, target_point,
                                                       lowerLimits=lower, upperLimits=upper, jointRanges=ranges, restPoses=rest,maxNumIterations=500,jointDamping=jointDamping,
                                                       physicsClientId=CLIENT)
