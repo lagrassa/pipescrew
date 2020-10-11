@@ -53,7 +53,7 @@ class ILPolicy:
             self.model.fit(observation_data, action_data, epochs = n_epochs, validation_split=validation_split)
         else:
             if params_file is None:
-                n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
+                n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 20)]
                 # Number of features to consider at every split
                 max_features = ['auto', 'sqrt']
                 # Maximum number of levels in tree
@@ -72,7 +72,7 @@ class ILPolicy:
                             'min_samples_split': min_samples_split,
                             'min_samples_leaf': min_samples_leaf,
                             'bootstrap': bootstrap}
-                rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 12, cv = 3, verbose=1, random_state=42, n_jobs = 12)# Fit the random search model 70 works
+                rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 48, cv = 3, verbose=1, random_state=42, n_jobs = 12)# Fit the random search model 70 works
                 rf_random.fit(observation_data,action_data) 
                 self.model=rf_random
             else:

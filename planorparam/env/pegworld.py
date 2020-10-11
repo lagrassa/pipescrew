@@ -50,6 +50,10 @@ class PegWorld():
             init_pos = (0,0,0.35)
             init_quat = (1,0,0,0)
             self.grasp_joint = 0#kinda sketchy tbh, try to just use the whole robot
+            import ipdb; ipdb.set_trace()
+            ut.set_joint_position(self.robot, 9, 0.03)
+            ut.set_joint_position(self.robot, 10, 0.03)
+
             set_pose(self.robot,(init_pos, init_quat))
 
 
@@ -164,9 +168,9 @@ class PegWorld():
 
         
 
-    def compute_IK(self, goal_pose, joints_to_plan_for, cur_pose=None, max_iter = 50):
+    def compute_IK(self, goal_pose, joints_to_plan_for, cur_pose=None, max_iter = 100):
         solutions = []
-        good_num_solutions = 2
+        good_num_solutions = 10
         for i in range(max_iter):
             rest =  np.mean(np.vstack([ut.get_min_limits(self.robot, joints_to_plan_for), ut.get_max_limits(self.robot, joints_to_plan_for)]), axis=0)
             rest = [ut.get_joint_positions(self.robot, ut.get_movable_joints(self.robot))]
@@ -257,7 +261,7 @@ class PegWorld():
     def visualize_traj(self, path):
         for pt in path:
             self.set_joints(pt)
-            input("ready for next set?")
+            #input("ready for next set?")
     def visualize_points(self, pt_set):
         for pt in pt_set:
             pb_pt = ut.create_sphere(0.005)
@@ -278,7 +282,8 @@ class PegWorld():
             print("Found path that can be inserted as well")
             insert_traj = res[0][0]
             insert_traj = self.get_push_down_traj(insert_traj, shape_class=shape_class)
-            n_pts = min(20, len(insert_traj))
+            n_pts = min(8, len(insert_traj))
+            print("n pts for grasp", n_pts)
             insert_traj = self.apply_mask(insert_traj, n_pts = n_pts)
             break
 
@@ -351,6 +356,7 @@ class PegWorld():
     Collision-free trajectory  to place object in hole
     """
     def place_object(self, visualize=False, shape_class=Rectangle, hole_goal=None, push_down=True):
+        state = p.saveState()
         if hole_goal is None:
             hole_goal = self.hole_goal.copy()
             hole_goal[0][-1] = 0.03
@@ -369,9 +375,11 @@ class PegWorld():
         # end moving in that last bit
         if visualize:
             self.visualize_traj(traj)
-        n_pts = min(20, len(traj))
-        traj = self.apply_mask(traj)
+        #n_pts = min(20, len(traj))
+        n_pts = min(7, len(traj))
+        traj = self.apply_mask(traj,n_pts = n_pts)
         assert(traj is not None)
+        p.restoreState(state)
         return traj
 
     def get_push_down_traj(self, traj, shape_class=Rectangle):

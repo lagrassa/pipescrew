@@ -1,4 +1,5 @@
 import argparse
+import matplotlib.pyplot as plt
 from agent.model_selection import ModelSelector
 
 import numpy as np
@@ -8,11 +9,15 @@ from env.block_push_ig_env import GymFrankaBlockPushEnv
 from planning.blockpushpolicy import BlockPushPolicy
 from planning.transition_models import LearnedTransitionModel, BlockPushSimpleTransitionModel
 
-def make_block_push_env():
+def make_block_push_env(two_d = False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', '-c', type=str, default='cfg/franka_block_push.yaml')
-    args = parser.parse_args()
-    cfg = YamlConfig(args.cfg)
+    #parser.add_argument('--cfg', '-c', type=str, default='cfg/franka_block_push_two_d.yaml')
+    #args = parser.parse_args()
+    if two_d:
+        cfg ='cfg/franka_block_push_two_d.yaml'
+    else:
+        cfg = 'cfg/franka_block_push.yaml'
+    cfg = YamlConfig(cfg)
     vec_env = GymFrankaBlockPushEnv(cfg)
     vec_env.reset()
     def custom_draws(scene):
@@ -130,10 +135,27 @@ def test_learned_transition_model_real_data():
     actions = np.load("data/actions.npy")
     next_states = np.load("data/next_states.npy")
     lm = LearnedTransitionModel()
+    mm = BlockPushSimpleTransitionModel()
     lm.train(states, actions, next_states)
-    predicted_next_states = lm.predict(states, actions, flatten=False)
-    max_dist = np.max(np.abs(predicted_next_states - next_states))
-    assert(max_dist) < 0.01
+    random_noise = np.random.uniform(low=-0.00001, high=0.00001, size=states.shape )
+    predicted_next_states = lm.predict(states+random_noise, actions, flatten=False)
+    max_dist = np.max(np.linalg.norm(predicted_next_states - next_states, axis=0))
+    plt.plot(predicted_next_states[:,1], label="predicted by GP")
+    plt.plot(next_states[:,1], label="actual next states")
+    plt.legend()
+    plt.show()
+    assert(max_dist) < 0.03
+
+    test_states = np.array([states[3]+[0.0001,0.015]])
+    test_actions = np.array([[-0.02, 300]])
+    next_states_pred = lm.predict(test_states, test_actions)
+    next_states_manual = mm.predict(test_states.flatten(), test_actions.flatten())
+    distance = np.linalg.norm(next_states_pred-next_states_manual)
+    gp_test_distance = np.linalg.norm(next_states_pred-test_states)
+    print("GP test distance", gp_test_distance)
+    print("distance from manual", distance)
+    assert(distance < 0.05)
+    assert(gp_test_distance > 0.008)
     print("test passed")
 
 def test_no_anomaly():
@@ -156,12 +178,12 @@ def test_anomaly():
     robot detects significant deviations
     """
     vec_env, custom_draws = make_block_push_env()
-    block_goal = vec_env.get_delta_goal(-0.4)
+    block_goal = vec_env.get_delta_goal(-0.3)
     policy = BlockPushPolicy(use_history=True)
     obs = vec_env._compute_obs(None)
     start_state = obs["observation"]
-    states, actions, model_per_t = policy.plan(start_state, block_goal, use_learned_model=False, horizon=900)
-    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 1.1, use_history=True, model_per_t=model_per_t, plot_deviations = True)
+    states, actions, model_per_t, manual_states = policy.plan(start_state, block_goal, use_learned_model=False, horizon=900, return_manual=True)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol = 1.1, use_history=True, model_per_t=model_per_t, plot_deviations = True, computed_manual_states=manual_states)
     assert(len(deviations) > 5)
 
 def test_patched():
@@ -169,17 +191,37 @@ def test_patched():
     robot detects significant deviations
     """
     vec_env, custom_draws = make_block_push_env()
-    block_goal = vec_env.get_delta_goal(-0.4)
+    block_goal = vec_env.get_delta_goal(-0.3)
     policy = BlockPushPolicy(use_history=True)
     obs = vec_env._compute_obs(None)
     start_state = obs["observation"]
-    states, actions, model_per_t = policy.plan(start_state, block_goal, use_learned_model=True, horizon=900)
-    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol=1.1, use_history=True,
-                                            model_per_t=model_per_t, plot_deviations=True)
+    tol = 0.1
+    states, actions, model_per_t, manual_states = policy.plan(start_state, block_goal, use_learned_model=True, tol=tol, horizon=900, return_manual=True)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol=tol, use_history=True,
+                                            model_per_t=model_per_t, plot_deviations=True, computed_manual_states=manual_states)
+    assert (len(deviations) < 2)
+
+def test_2D():
+    """
+    robot detects significant deviations
+    """
+    vec_env, custom_draws = make_block_push_env(two_d = True)
+    block_goal = vec_env.get_delta_goal(-0.3)
+    policy = BlockPushPolicy(use_history=True)
+    obs = vec_env._compute_obs(None)
+    start_state = obs["observation"]
+    tol = 0.1
+    states, actions, model_per_t, manual_states = policy.plan(start_state, block_goal, use_learned_model=True,
+                                                              tol=tol, horizon=900, return_manual=True)
+    deviations = policy.monitored_execution(vec_env, states, actions, custom_draws, tol=tol, use_history=True,save_history=False,
+                                            model_per_t=model_per_t, plot_deviations=True,
+                                            computed_manual_states=manual_states)
     assert (len(deviations) < 2)
     #plot points where there was an anomaly
 #test_go_to_start()
-# test_learned_transition_model()
-test_learned_transition_model_real_data()
+#test_learned_transition_model()
+#test_learned_transition_model_real_data()
 #test_patched()
+test_2D()
+#test_anomaly()
 #test_short_goal()

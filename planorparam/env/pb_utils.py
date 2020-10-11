@@ -2431,7 +2431,7 @@ def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disa
         for link1, link2 in check_link_pairs:
             # Self-collisions should not have the max_distance parameter
             if pairwise_link_collision(body, link1, body, link2): #, **kwargs):
-                if link1 == 6 and link2 == 8 or link1 == 8 and link2 == 6:
+                if link1 == 6 and link2 == 8 or link1 == 8 and link2 == 6 or link1 == 0 and link2 == 2:
                     return False #panda is improperly specified: they do indeed have a contact point
                 #print("Pairwise link collision", get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
                 set_joint_positions(body, joints, old_q)

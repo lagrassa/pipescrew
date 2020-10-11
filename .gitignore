@@ -1,0 +1,6 @@
+*pycache*
+*.npy
+*models*
+planenv/
+*.idea
+*.egg*

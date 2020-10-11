@@ -11,7 +11,6 @@ from skimage.util import random_noise
 from skimage.filters import gaussian
 from scipy import ndimage
 
-
 def test_one_image():
     import imageio
     image =imageio.imread("encoder_test_img_Color.png")
@@ -31,12 +30,16 @@ def test_one_image():
 
 def test_kinect_ims(data_folder, shape_class, augment =True):
     data_list = []
+    import ipdb; ipdb.set_trace()
     for fn in os.listdir("data/"+data_folder+"/"):
         if "kinect_data" in fn:
             new_data = np.load("data/"+data_folder+"/"+fn)
             new_data_processed = processimgs.process_raw_camera_data(new_data, shape_class)      
             data_list.append(new_data_processed)
-    camera_data = np.concatenate(data_list, axis=0)
+    if len(data_list) > 0:
+        camera_data = np.concatenate(data_list, axis=0)
+    else:
+        camera_data = data_list[0]
     if augment:
         num_rotations = 10
         num_shear = 10
@@ -48,7 +51,7 @@ def test_kinect_ims(data_folder, shape_class, augment =True):
                 new_im = rotate(im, angle=np.random.uniform(low=-9,high=9))
                 new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
             for _ in range(num_shear):
-                tf = AffineTransform(shear=np.random.uniform(low=-0.5, high=0.5))
+                tf = AffineTransform(shear=np.random.uniform(low=-0.9, high=0.9))
                 new_im = transform.warp(im, tf, order=1, preserve_range=True, mode='wrap')
                 new_camera_data = np.vstack([new_camera_data, new_im.reshape((1,)+new_im.shape)])
             for _ in range(num_random_noise):
@@ -68,11 +71,16 @@ def test_kinect_ims(data_folder, shape_class, augment =True):
     camera_data = camera_data[idxs]
     my_vae, encoder, decoder, inputs, outputs, output_tensors = vae.make_dsae(image.shape[0], image.shape[1], n_channels = 1)
     n_train = 0.1
-    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 20)
-
-    my_vae.save_weights("models/"+data_folder+"/test_weights.h5y")
-shape_class = 'Rectangle'
-data_folder='rectangle20'
-test_kinect_ims(data_folder, shape_class)
+    vae.train_vae(my_vae, camera_data, n_train, inputs, outputs, output_tensors, n_epochs = 30)
+    model_folder =  "models/"+data_folder
+    model_fn =model_folder+ "/test_weights.h5y"
+    if not os.path.exists(model_folder):
+        os.mkdir(model_folder)
+    my_vae.save_weights(model_fn)
+if __name__ == "__main__":
+    import sys
+    shape_class = sys.argv[2]
+    data_folder = sys.argv[1]
+    test_kinect_ims(data_folder, shape_class)
 
 

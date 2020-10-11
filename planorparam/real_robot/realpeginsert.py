@@ -1,11 +1,12 @@
 from frankapy import FrankaArm
-import GPy
+import GPy as gpy
 import sys
 import scipy.stats
 mvn = scipy.stats.multivariate_normal
 import os
 from shapes import Circle, Rectangle, Obstacle, Square
 import rospy
+import time
 from pyquaternion import Quaternion
 import cv_bridge
 import time
@@ -34,19 +35,19 @@ print("waiting for camera")
 rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
 
 class Robot():
-    def __init__(self, visualize=False, setup_pb=True, data_folder="test", shape_class=Rectangle):
+    def __init__(self, visualize=False, setup_pb=True, data_folder="test", shape_class=Rectangle, training=False):
         robot_state_server_name = '/get_current_robot_state_server_node_1/get_current_robot_state_server'
         rospy.wait_for_service(robot_state_server_name)
         self._get_current_robot_state = rospy.ServiceProxy(robot_state_server_name, GetCurrentRobotStateCmd)
         force = self.feelforce()
         self.contact_threshold = -4.5 # less than is in contact
-        self.setup_stilde_training_data(data_folder)
-        self.il_policy = None
-        if self.il_policy is None:
+        self.prefix = "test"
+        self.il_policy = False
+        if self.il_policy is None and not training:
             #self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, load_fn = "models/ilpolicy.h5y")
             self.il_policy = get_il_policy(data_folder, shape_class.__name__)#self.il_policy = ILPolicy(np.hstack([encoded_camera_data, ee_data]), ee_data, model_type ="forest", load_fn = "models/rfweights.npy")
         self.autoencoder = None
-        self.grip_width = 0.02
+        self.grip_width = 0.01
         self.bridge = cv_bridge.CvBridge()
         self.shape_to_goal_loc = {}
         self.shape_type_to_ids = {Rectangle:(0,1,2,3)}
@@ -57,18 +58,38 @@ class Robot():
         self.setup_perception()
         if setup_pb:
             self.setup_pbworld(visualize=visualize, shape_class=shape_class)
-    def setup_stilde_training_data(self, data_folder):
-        import ipdb; ipdb.set_trace()
-        good_model_path = "data/"+data_folder+"/good_model_states.npy"
-        bad_model_path = "data/"+data_folder+"/bad_model_states.npy"
-        if os.path.exists(good_model_path):
-            self.good_model_states = np.load(good_model_path, allow_pickle=True)
+    def setup_stilde_training_data(self, data_folder, training=False):
+        if training:
+            good_model_path = "data/"+data_folder+"/"+self.prefix+"good_model_states.npy"
+            bad_model_path = "data/"+data_folder+"/"+self.prefix+"bad_model_states.npy"
+            self.good_model_path = good_model_path
+            self.bad_model_path = bad_model_path
+            if os.path.exists(good_model_path):
+                self.good_model_states = np.load(good_model_path, allow_pickle=True)
+            else:
+                self.good_model_states = None
+            if os.path.exists(bad_model_path):
+                self.bad_model_states = np.load(bad_model_path, allow_pickle=True)
+            else:
+                self.bad_model_states = None
         else:
-            self.good_model_states = None
-        if os.path.exists(bad_model_path):
-            self.bad_model_states = np.load(bad_model_path, allow_pickle=True)
-        else:
-            self.bad_model_states = None
+            good_model_states = []
+            bad_model_states = []
+            model_folder = "data/"+data_folder+"/"
+            for fn in os.listdir(model_folder):
+                if "good" in fn:
+                    data = np.load(model_folder+fn, allow_pickle=True)
+                    if data.all() is not None and len(data) > 0:
+                        good_model_states.append(data)
+                elif "bad" in fn:
+                    data = np.load(model_folder+fn, allow_pickle=True)
+                    if data.all() is not None and len(data) > 0:
+                        if len(data.shape) == 1:
+                            data = data.reshape(1,-1)
+                        bad_model_states.append(data)
+            self.good_model_states = np.concatenate(good_model_states,axis=0)
+            self.bad_model_states = np.concatenate(bad_model_states,axis=0)
+           
     def setup_pbworld(self, visualize, shape_class=Rectangle):
         board_loc = [[0.379,-0.0453,0.012],[0.707,0.707,0,0]]
         #import ipdb; ipdb.set_trace()
@@ -78,6 +99,9 @@ class Robot():
         rectangle_loc = rigid_transform_to_pb_pose(self.get_shape_location(Rectangle))
         hole_goal = rigid_transform_to_pb_pose(self.get_shape_goal_location(shape_class))
         self.pb_world = PegWorld(rectangle_loc=rectangle_loc, hole_goal = hole_goal, circle_loc=circle_loc, board_loc=board_loc, obstacle_loc=obstacle_loc, square_loc=square_loc, visualize=visualize)
+        self.update_pbworld()
+        import ipdb; ipdb.set_trace()
+
     def setup_perception(self):
         self.cfg = YamlConfig("april_tag_pick_place_azure_kinect_cfg.yaml")
         self.T_camera_world = RigidTransform.load(self.cfg['T_k4a_franka_path'])
@@ -120,18 +144,17 @@ class Robot():
                 return delta_ee_rt
             else:
                 curr_rt = fa.get_pose()
-                scalar = 1
+                scalar = 1.9 #overcome friction, 1.5 normally
                 delta_ee_rt.translation *= scalar
                 delta_ee_rt.from_frame = "franka_tool"
                 delta_ee_rt.to_frame = "franka_tool"
                 newpos = fa.get_pose()
                 newpos.translation += delta_ee_rt.translation
-                import ipdb; ipdb.set_trace() 
                 fa.goto_pose(newpos,cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
                 #res = input("Complete?")
                 z_pos = fa.get_pose().translation[-1]
                 print("current z_pos", np.round(z_pos,4))
-                in_hole = 0.016
+                in_hole = 0.018
                 if z_pos <= in_hole:
                     print("Detected successfully in hole")
                     return 
@@ -142,16 +165,18 @@ class Robot():
     @param shape_class Shape \in {Circle, Square, Rectangle, etc} - type of shape the detector should look for
     @param goal whether the detector should look for the object or goal hole
     """
-    def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False):
+    def detect_ar_world_pos(self,straighten=True, shape_class = Rectangle, goal=False, allow_retry=True):
         #O, 1, 2, 3 left hand corner. average [0,2] then [1,3]
         T_tag_cameras = []
         detections = self.april.detect(self.sensor, self.intr, self.cfg['vis_detect'])
-
         detected_ids = []
         for new_detection in detections:
             detected_ids.append(int(new_detection.from_frame.split("/")[1])) #won't work for non-int values
             T_tag_cameras.append(new_detection)
         T_tag_camera = shape_class.tforms_to_pose(detected_ids, T_tag_cameras, goal=goal) #as if there were a tag in the center
+        if T_tag_camera is None:
+            time.sleep(0.1)
+            return self.detect_ar_world_pos(straighten=straighten, shape_class=shape_class, goal=goal, allow_retry=False)
         T_tag_camera.to_frame="kinect2_overhead"
         T_tag_world = self.T_camera_world * T_tag_camera
 
@@ -166,8 +191,10 @@ class Robot():
        fa.open_gripper()
        path, insert_traj = self.pb_world.grasp_object(shape_class=shape_type, visualize=True)
        self.insert_traj = insert_traj
-       res =  self.follow_traj(path, monitor_execution=False, traj_type="joint", dt=3.5, training=False, data_folder=None)
-       fa.goto_gripper(self.grip_width, grasp=True)
+       res =  self.follow_traj(path, monitor_execution=False, traj_type="joint", dt=3, training=False, data_folder=None)
+       #fa.goto_gripper(self.grip_width, grasp=True)
+       fa.close_gripper(grasp=True, block=False)
+       time.sleep(1)
        return res
 
         
@@ -204,8 +231,12 @@ class Robot():
     #    path = self.linear_interp_planner(start, T_tool_world)
        path = self.linear_interp_planner(fa.get_pose(), T_tool_world_fixed_rot)
        self.follow_traj(path, monitor_execution=monitor_execution)
-       fa.close_gripper()
+       fa.close_gripper(grasp=True)
        fa.goto_gripper(self.grip_width, grasp=True)
+
+    def update_pbworld(self):
+        real_joints = fa.get_joints()
+        self.pb_world.set_joints(real_joints)
 
     """
     Samples one point in the precondition of the model-free policy
@@ -224,11 +255,13 @@ class Robot():
         #self.gp_precond.optimize() #just once
         #sample point from modelfree 1recond
         #return ee_data[np.random.randint(len(ee_data))]#TODO do this using a larger set of samples using the GP, but this is faster
-        k = 0.0001
+        k = 0.0000001
         try:
             my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.00,-0.00,0,0,0,0,0]), cov = np.cov(ee_data.T))
         except:
             my_mvn = mvn(mean=np.mean(ee_data,axis=0)+np.array([-0.00,-0.00,0,0,0,0,0]), cov = k*np.eye(ee_data.shape[1])+np.cov(ee_data.T))
+        if len(ee_data.shape) == 1: #only 1 point, not much you can do
+            my_mvn = mvn(mean=ee_data+np.array([-0.00,-0.00,0,0,0,0,0]), cov = k)
  
         return my_mvn.rvs()
 
@@ -238,17 +271,18 @@ class Robot():
     else, it just uses linear interpolation
     """
     def goto_modelfree_precond(self, use_planner=False, data_folder="test"):
-        import ipdb; ipdb.set_trace()
         sample = self.sample_modelfree_precond_pt(data_folder=data_folder) 
+        print(sample.round(2))
         monitor_execution=True
         #go up slightly to avoid the expected model failure region
         if use_planner:
-            sample[2] += 0.035 #keep it out of the board
-            sample[2] += self.grasp_offset #keep it out of the board
+            sample[2] -= 0.001 #offset the bit added in the planner
             pb_sample = (sample[0:3], sample[3:])
+            self.update_pbworld()  
             place_traj = self.pb_world.place_object(hole_goal=pb_sample, shape_class=shape_class, visualize=True, push_down = False)
-            import ipdb; ipdb.set_trace()
-            res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 5)
+            if place_traj is None:
+                import ipdb; ipdb.set_trace()
+            res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="joint", dt = 3)
 
         else:
             up_amount = 0.008
@@ -269,18 +303,19 @@ class Robot():
     """
     def model_based_insert_shape(self, T_tool_world, monitor_execution=True, training=True, use_patch=False, data_folder="test", shape_class=Rectangle):
         hole_goal = rigid_transform_to_pb_pose(T_tool_world)
+        self.update_pbworld()  
         place_traj = self.pb_world.place_object(shape_class=shape_class, visualize=True)
         if place_traj is None:
             place_traj = self.insert_traj #backup
         total_time = 12
-        dt = 2.5#max(1.5,total_time/(len(place_traj)))
+        dt = 2#max(1.5,total_time/(len(place_traj)))
         res =  self.follow_traj(place_traj, cart_gain = 2000, z_cart_gain = 2000, rot_cart_gain=250, use_patch=use_patch, monitor_execution=monitor_execution, traj_type="joint", dt = dt, training=training, data_folder=data_folder)
 
         if res == "expected_good":
             down_pose = fa.get_pose()
             down_amount = 0.02
             down_pose.translation[-1] -= down_amount
-            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 1, training=training, data_folder=data_folder)
+            return self.follow_traj([down_pose], cart_gain = 500, z_cart_gain = 500, rot_cart_gain=250, monitor_execution=monitor_execution, traj_type="cart", dt = 2.5, training=training, data_folder=data_folder)
             
         else:
             return res
@@ -349,23 +384,43 @@ class Robot():
     on the points or only selecting some of them. 
     
     """
-    def in_region_with_modelfailure(self,pt, data_folder="test",retrain=True):
-        import ipdb; ipdb.set_trace()
+    def in_region_with_modelfailure(self,pt, data_folder="test",retrain=False):
+        print("Always in region of model failure for debugging. Turn off for experiments")
         if self.bad_model_states is None:
             return False  #not enough info
-        if retrain:
-            bad = np.load("data/"+data_folder+"/bad_model_states.npy", allow_pickle=True)
-            good = np.load("data/"+data_folder+"/good_model_states.npy", allow_pickle=True)
+        if retrain or self.gp is None:
+            bad =  self.bad_model_states
+            good = self.good_model_states
+            max_xs = np.array([.6,.4,.3,1,1,1,1])
+            min_xs = np.array([.1,-.4,-0.02, 0,0,0,0])
+            lengthscale = max_xs - min_xs
+            lengthscale_bound = np.vstack([[0.00001*lengthscale],[1*lengthscale]])
             if len(bad) == 0 and len(good) == 0:
                 return False
             X = np.vstack([good, bad])
             Y = np.vstack([np.ones((len(good),1)), np.zeros((len(bad),1))])
+
             if self.gp is None:
-                self.gp = GPy.models.GPClassification(X,Y)
-                for i in range(6):
-                    self.gp.optimize()
+                k = gpy.kern.Matern52(len(max_xs), ARD=True, lengthscale=lengthscale)
+                self.gp = gpy.models.GPRegression(X, Y, k)
+                for i in range(len(max_xs)):
+                    self.gp.kern.lengthscale[i:i+1].constrain_bounded(lengthscale_bound[0][i],
+                    lengthscale_bound[1][i], warning=False)
+                self.gp['.*variance'].constrain_bounded(1e-1,2., warning=False)
+                self.gp['Gaussian_noise.variance'].constrain_bounded(1e-4,0.01, warning=False)
+                # These GP hyper parameters need to be calibrated for good uncertainty predictions.
+                self.gp.optimize(messages=True)
+                #gp = GaussianProcessClassifier(kernel = kernel, n_restarts_optimizer=10)
+                #gp.fit(X,Y)
+                #pred_bad = self.gp.predict(bad)
+                #pred_good = self.gp.predict(good)
+                #print("bad", pred_bad[0].round(2))
+                #print("good", pred_good[0].round(2))
+
+
         pred = self.gp.predict(np.hstack([pt.translation, pt.quaternion]).reshape(1,-1))[0]
-        return not bool(np.round(pred.item()))
+        print(pred, "gp pred")
+        return (pred < 0.85)
 
     """
     Follows each pt in path with the specified gains
@@ -404,9 +459,8 @@ class Robot():
             expect_contact = False
             if new_pos.translation[2] < 0:
                 expect_contact = True
-                import ipdb; ipdb.set_trace()
             if traj_type == "cart":
-                fa.goto_pose(new_pos, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
+                fa.goto_pose(new_pos, ignore_virtual_walls=True, cartesian_impedances=[cart_gain, cart_gain, z_cart_gain,rot_cart_gain, rot_cart_gain, rot_cart_gain]) #one of these but with impedance control? compliance comes from the matrix so I think that's good enough
             else:
                 #print("Curr joints", np.round(fa.get_joints(),2))
                 #print("proposed joints", np.round(pt,2))
@@ -414,9 +468,8 @@ class Robot():
                 joints_list = np.array(pt).tolist()
                 if not fa.is_joints_reachable(joints_list):
                     print("Joints not reachable")
-                    import ipdb; ipdb.set_trace()
                 else:
-                    fa.goto_joints(np.array(pt).tolist(), duration=dt)
+                    fa.goto_joints(np.array(pt).tolist(), duration=dt, ignore_virtual_walls=True)
             force = self.feelforce()
             model_deviation = False
             #estimate this function from fitting data by measuring curves and how much the ee
@@ -434,7 +487,6 @@ class Robot():
                 try:
                     if (np.linalg.norm(fa.get_pose().translation-new_pos.translation) >1.96*sigma_cart).any():
                         model_deviation = True
-                        import ipdb; ipdb.set_trace()
                         print("Farther than expected. Expected "+str(np.round(new_pos.translation,4))+" but got "+
                             str(np.round(fa.get_pose().translation,4)))
                     if (Quaternion.absolute_distance(Quaternion(fa.get_pose().quaternion),Quaternion(new_pos.quaternion)) > 1.96*sigma_rot):
@@ -462,8 +514,8 @@ class Robot():
                     else: 
                         self.good_model_states = np.vstack([self.good_model_states, (np.hstack([cart_poses[-2].translation,cart_poses[-2].quaternion]))])
                 if training:
-                    np.save("data/"+data_folder+"/"+str(prefix)+"bad_model_states.npy", self.bad_model_states)
-                    np.save("data/"+data_folder+"/"+str(prefix)+"good_model_states.npy", self.good_model_states)
+                    np.save(self.bad_model_path, self.bad_model_states)
+                    np.save(self.good_model_path, self.good_model_states)
                 if model_deviation:
                     print("Ending MB policy due to model deviation")
                     return "model_failure"
@@ -556,6 +608,7 @@ class Robot():
             val = input()
             data = rospy.wait_for_message("/frontdown/rgb/image_raw", Image)
             img = self.bridge.imgmsg_to_cv2(data, desired_encoding="passthrough")
+            noise = np.random.uniform(low=-0.005, high = 0.005)
             if "start" in val:
                 started=True
                 print("start executing skill")
@@ -635,6 +688,7 @@ def straighten_transform(rt):
 def run_insert_exp(robot, prefix, use_patch=False, training=True, use_planner=False, data_folder="test", shape_class = Rectangle):
     fa.open_gripper()
     fa.reset_joints()
+    robot.setup_stilde_training_data(data_folder, training=training)
     import ipdb; ipdb.set_trace()
     _ = input("reset scene. Ready?")
     shape_center = robot.get_shape_location(shape_class)
@@ -642,7 +696,6 @@ def run_insert_exp(robot, prefix, use_patch=False, training=True, use_planner=Fa
     robot.grasp_shape(shape_center, shape_class, use_planner=use_planner, monitor_execution=False, training=False) #not training for this part
     start_time = time.time()
     result = robot.insert_shape(use_planner=True, training=training, use_patch=use_patch, data_folder=data_folder)
-    import ipdb; ipdb.set_trace()
     print("time elapsed", time.time()-start_time)
     if use_patch:
         if result == "model_failure" or result == "expected_model_failure":
@@ -652,6 +705,7 @@ def run_insert_exp(robot, prefix, use_patch=False, training=True, use_planner=Fa
                 np.save("data/"+data_folder+"/"+str(prefix)+"kinect_data.npy", images)
                 np.save("data/"+data_folder+"/"+str(prefix)+"ee_data.npy", ees)
             else:
+                robot.goto_modelfree_precond(use_planner=use_planner, data_folder=data_folder)
                 robot.modelfree(data_folder=data_folder) #avoiding the region where the model is bad
                 print("time elapsed", time.time()-start_time)
         else:
@@ -670,9 +724,10 @@ def run_insert_exp(robot, prefix, use_patch=False, training=True, use_planner=Fa
 #oval
 if __name__ == "__main__":
     n_exps = 3
-    test_modelfree = False 
+    test_modelfree = False
     train_modelfree=False
-    if not test_modelfree:
+    training=True
+    if not test_modelfree and not train_modelfree:
         fa.open_gripper()
         fa.reset_joints()
     data_folder = sys.argv[1]
@@ -680,9 +735,9 @@ if __name__ == "__main__":
     if not os.path.exists("data/"+data_folder):
         os.mkdir("data/"+data_folder)
 
-    robot = Robot(visualize=True, setup_pb=False, shape_class=shape_class, data_folder=data_folder)
+    robot = Robot(visualize=True, setup_pb=False, shape_class=shape_class, data_folder=data_folder, training=training)
     if train_modelfree:
-        for prefix in range(4,):
+        for prefix in [12]:
             actions, images, ees = robot.keyboard_teleop()
             np.save("data/"+data_folder+"/"+str(prefix)+"actions.npy", actions)
             np.save("data/"+data_folder+"/"+str(prefix)+"kinect_data.npy", images)
@@ -692,6 +747,6 @@ if __name__ == "__main__":
     #input("reset scene. Ready?")
     #print("shape loc", np.round(robot.get_shape_location(Rectangle).translation,2))
     #print("goal loc", np.round(robot.get_shape_goal_location(Rectangle).translation,2))
-    for i in [0,1,2]:
-        run_insert_exp(robot, i, training=True, use_planner=True, data_folder=data_folder, use_patch=True, shape_class=shape_class)
-    
+    for i in [0,1,2,3,4,5,6]:
+        robot.prefix=str(i)
+        run_insert_exp(robot, i, training=training, use_planner=True, data_folder=data_folder, use_patch=True, shape_class=shape_class)
