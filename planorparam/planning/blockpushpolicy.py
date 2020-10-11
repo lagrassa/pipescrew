@@ -3,6 +3,8 @@ from sklearn.exceptions import  NotFittedError
 from carbongym_utils.math_utils import RigidTransform_to_transform, transform_to_RigidTransform
 import numpy as np
 import matplotlib.pyplot as plt
+plt.rcParams["font.size"] = 28
+plt.rcParams['lines.markersize'] = 20
 from autolab_core import RigidTransform
 from planning.transition_models import BlockPushSimpleTransitionModel, LearnedTransitionModel
 from agent.model_selection import ModelSelector
@@ -12,7 +14,7 @@ class BlockPushPolicy():
         self.learned_transition_model = LearnedTransitionModel()
         self.manual_transition_model_idx = 0
         self.learned_transition_model_idx = 1
-        self.tolerance = 0.2 #in percentage of motion in cm
+        self.tolerance = 0.02 #in percentage of motion in cm
         self.model_selector = ModelSelector(use_history=use_history)
         self.model_selector.add(self.manual_transition_model, model_type = "manual")
         self.model_selector.add(self.learned_transition_model, model_type = "GP")
@@ -32,8 +34,8 @@ class BlockPushPolicy():
 
     def sample_actions(self, state, goal, delta = 0.05):
         #Adapted for simpler action space
-        stiffness = 300
-        return np.array([-0.02, stiffness])
+        stiffness = 300#300, 10 too low
+        return np.array([-0.05, stiffness])
         if len(state.shape) == 2:
             dir = (goal[:,:3]-state[:,:3])/(np.linalg.norm(goal[:,:3]-state[:,:3]))
         else:
@@ -44,16 +46,20 @@ class BlockPushPolicy():
     """
     Planner that uses DFS; nothing fancy
     """
-    def plan(self, start, goal,  delta = 0.001,use_learned_model=True, horizon = 50, plot_transition_model_devs = False):
+    def plan(self, start, goal,  delta = 0.001,use_learned_model=True, horizon = 50, plot_transition_model_devs = False, tol = None, return_manual=False):
         states = None
         action_shape = (8,)
         actions = None
+        if tol is not None:
+            self.tolerance = tol
         current_state = start.copy()
-        goal_tol = 0.01
+        goal_tol = 0.02
         model_per_t = [] #0 for planned 1 for learned
         i = 0
         states = [current_state] #next states after taking an action, including the first though.
         actions = []
+        manual_states = [current_state]
+        current_manual_state = current_state.copy()
         pred_gp_states = []
         while np.max(np.linalg.norm(current_state - goal, axis=0)) > goal_tol:
             #print("planner distance", np.linalg.norm(current_state[:,:3]-goal[:,:3]))
@@ -71,29 +77,45 @@ class BlockPushPolicy():
                 model_idx = self.learned_transition_model_idx
             model_per_t.append(model_idx)
             next_state = model.predict(current_state, action)
-            pred_gp_state = self.learned_transition_model.predict(current_state, action)
-            pred_gp_states.append(pred_gp_state)
-            print("GP error", pred_gp_state-next_state)
+            next_manual_state = self.manual_transition_model.predict(current_manual_state, action)
+            if np.linalg.norm(next_state-current_state) < 1e-4:
+                next_state = self.manual_transition_model.predict(current_state, action) #hack
+                model_idx = self.manual_transition_model_idx
+            if plot_transition_model_devs:
+                pred_gp_state = self.learned_transition_model.predict(current_state, action)
+                pred_gp_states.append(pred_gp_state)
+                print("Learned error", pred_gp_state-next_state)
             current_state = next_state.copy()
+            current_manual_state = next_manual_state.copy()
             #action = action.reshape((1,) + action.shape)
             #next_state = next_state.reshape((1,) + next_state.shape)
             actions.append(action)
             states.append(next_state)
-            assert(len(actions) == len(states)-1 == len(model_per_t))
+            manual_states.append(next_manual_state)
+            try:
+                assert(len(actions) == len(states)-1 == len(model_per_t))
+            except AssertionError:
+                print("actions of l ength %d states of length %d model_per_t of %d", *[len(item) for item in [actions, states, model_per_t]])
             i +=1
         states = np.vstack(states)
+        manual_states = np.vstack(manual_states)
         actions = np.vstack(actions)
-        pred_gp_states = np.vstack(pred_gp_states)
         states = states.T
+        manual_states = manual_states.T
         actions= actions.T
-        pred_gp_states = pred_gp_states.T
         model_per_t = np.array(model_per_t)
         if plot_transition_model_devs:
-            plt.plot(states[1,:], label="manual")
+            pred_gp_states = np.vstack(pred_gp_states)
+            pred_gp_states = pred_gp_states.T
+            plt.plot(states[1,:], label="chosen")
             plt.plot(pred_gp_states[1,:], label="GP")
             plt.legend()
             plt.show()
-        return states, actions, model_per_t
+        if return_manual:
+            return states, actions, model_per_t, manual_states
+
+        else:
+            return states, actions, model_per_t
     """
     tol: percentage error that's OK relative to the magnitude of the motion
     """
@@ -102,7 +124,9 @@ class BlockPushPolicy():
                             tol = 0.01,
                             n_steps = 20,
                             use_history=False,
+                            save_history=False,
                             add_all = True,
+                            computed_manual_states = None,
                             plot_deviations=False):
         """
         :param states, actions states and high level actions to execute
@@ -139,19 +163,22 @@ class BlockPushPolicy():
             learned_timesteps = timesteps[model_per_t == self.learned_transition_model_idx]
             manual_state_preds = states[1,1:][model_per_t == self.manual_transition_model_idx]
             learned_state_preds = states[1,1:][model_per_t == self.learned_transition_model_idx]
-            plt.scatter(manual_timesteps, manual_state_preds ,label="manually predicted z", marker = "o" )
-            plt.scatter(learned_timesteps, learned_state_preds, label="learned model predicted z" , marker="x" )
-            plt.plot(timesteps, actual_states[:,1], label = "actual z")
+            plt.scatter(timesteps, computed_manual_states[1,1:],label="manually predicted x", marker = "o" )
+            plt.scatter(learned_timesteps, learned_state_preds, label="learned model predicted x" , marker="x")
+            plt.plot(timesteps, actual_states[:,1], label = "actual x")
+            plt.xlabel("t")
+            plt.ylabel("x")
             plt.legend()
             plt.show()
-            plt.plot(timesteps, deviations)
+            #plt.plot(timesteps, deviations)
             plt.title("Deviations")
             plt.show()
         manual_states = states[:,1:][:,model_per_t == self.manual_transition_model_idx]
         manual_deviations = deviations[model_per_t == self.manual_transition_model_idx]
-        self.model_selector.add_history(manual_states, manual_deviations, self.manual_transition_model)
+        if save_history:
+            self.model_selector.add_history(manual_states, manual_deviations, self.manual_transition_model)
         learned_model_training_s, learned_model_training_a,learned_model_training_sprime = [np.vstack(data) for data in [learned_model_training_s, learned_model_training_a, learned_model_training_sprime]]
-        self.learned_transition_model.train(learned_model_training_s, learned_model_training_a, learned_model_training_sprime, save_data = True, load_data = use_history)
+        self.learned_transition_model.train(learned_model_training_s, learned_model_training_a, learned_model_training_sprime, save_data = save_history, load_data = use_history)
 
         return deviations, deviated_states
 
@@ -159,7 +186,7 @@ class BlockPushPolicy():
         for env_index, env_ptr in enumerate(vec_env._scene.env_ptrs):
             block_ah = vec_env._scene.ah_map[env_index][vec_env._block_name]
             block_transform = vec_env._block.get_rb_transforms(env_ptr, block_ah)[0]
-            ee_transform = vec_env._franka.get_ee_transform(env_ptr, vec_env._franka_name)
+            ee_transform = vec_env._frankas[env_index].get_ee_transform(env_ptr, vec_env._franka_name)
             grasp_transform = gymapi.Transform(p=block_transform.p, r=ee_transform.r)
             pre_grasp_transfrom = gymapi.Transform(p=grasp_transform.p, r=grasp_transform.r)
             pre_grasp_transfrom.p.z += z_offset
@@ -169,12 +196,12 @@ class BlockPushPolicy():
             rt.rotation = np.dot(rot_matrix, rt.rotation)
             pre_grasp_transfrom = RigidTransform_to_transform(rt)
             stiffness = 1e3
-            vec_env._franka.set_attractor_props(env_index, env_ptr, vec_env._franka_name,
+            vec_env._frankas[env_index].set_attractor_props(env_index, env_ptr, vec_env._franka_name,
                                              {
                                                  'stiffness': stiffness,
                                                  'damping': 6 * np.sqrt(stiffness)
                                              })
-            vec_env._franka.set_ee_transform(env_ptr, env_index, vec_env._franka_name, pre_grasp_transfrom)
+            vec_env._frankas[env_index].set_ee_transform(env_ptr, env_index, vec_env._franka_name, pre_grasp_transfrom)
         #for i in range(50):
         #    vec_env.step([0.1,0.1,0.1,0,0,0,1])
     def go_to_block(self, vec_env):
@@ -182,17 +209,17 @@ class BlockPushPolicy():
         for env_index, env_ptr in enumerate(vec_env._scene.env_ptrs):
             block_ah = vec_env._scene.ah_map[env_index][vec_env._block_name]
             block_transform = vec_env._block.get_rb_transforms(env_ptr, block_ah)[0]
-            ee_transform = vec_env._franka.get_ee_transform(env_ptr, vec_env._franka_name)
+            ee_transform = vec_env._frankas[env_index].get_ee_transform(env_ptr, vec_env._franka_name)
             grasp_transform = gymapi.Transform(p=block_transform.p, r=ee_transform.r)
             pre_grasp_transfrom = gymapi.Transform(p=grasp_transform.p, r=grasp_transform.r)
             pre_grasp_transfrom.p.z += vec_env._cfg['block']['dims']['width']/2. -eps
 
             pre_grasp_transfrom.p.y -=0.01
             stiffness = 20
-            vec_env._franka.set_attractor_props(env_index, env_ptr, vec_env._franka_name,
+            vec_env._frankas[env_index].set_attractor_props(env_index, env_ptr, vec_env._franka_name,
                                                 {
                                                     'stiffness': stiffness,
                                                     'damping': 2 * np.sqrt(stiffness)
                                                 })
-            vec_env._franka.set_ee_transform(env_ptr, env_index, vec_env._franka_name, pre_grasp_transfrom)
+            vec_env._frankas[env_index].set_ee_transform(env_ptr, env_index, vec_env._franka_name, pre_grasp_transfrom)
 

@@ -32,8 +32,8 @@ class ModelSelector():
     def add_history(self, states, errors, input_model):
         #add to states in data
         if self.all_states is not None:
-            self.all_states = np.vstack([self.all_states, states])
-            self.all_errors = np.vstack([self.all_errors, errors])
+            self.all_states = np.hstack([self.all_states, states])
+            self.all_errors = np.hstack([self.all_errors, errors])
         else:
             self.all_states = states
             self.all_errors = errors
@@ -84,7 +84,7 @@ class ManualModelClassifier():
                            'min_samples_split': min_samples_split,
                            'min_samples_leaf': min_samples_leaf,
                            'bootstrap': bootstrap}
-            self.rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=30, cv=3, verbose=1,
+            self.rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=12, cv=3, verbose=1,
                                            random_state=42, n_jobs=12)  # Fit the random search model
             if init_states is not None:
                 self.train(init_states, init_errors)
@@ -93,8 +93,8 @@ class ManualModelClassifier():
         if len(errors.shape) == 1:
             errors = errors.reshape(1,-1)
         self.rf_random.fit(states.T, errors.T)
-        pred_states = self.rf_random.predict(states.T)
-        print(np.mean(pred_states-errors), "mean errors on current data")
+        pred_errors = self.rf_random.predict(states.T)
+        print(np.mean(pred_errors-errors), "mean errors on current data")
     """
     :param predicts the amount of error
     """

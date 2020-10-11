@@ -21,6 +21,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
     def __init__(self, cfg):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
         super().__init__(cfg, n_inter_steps=cfg["env"]["n_inter_steps"], inter_step_cb=render_func, auto_reset_after_done=False)
+        #super()._init_action_space(cfg)
     """
     IMPORTANT ASSUMPTION:
     if env_idx = 0, then it's the "real world" and if env_idx = 1 then its the "planning world" for many of these methods.
@@ -36,40 +37,30 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                             rb_props=cfg['block']['rb_props'],
                             asset_options=cfg['block']['asset_options']
                             )
-        self._block_name = 'block0'
-        rough_coef = 0.5
-        self.dt = cfg['scene']['gym']['dt']
-        self._board = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['boardpiece']['dims'],
-                                  shape_props=cfg['boardpiece']['shape_props'],
-                                  rb_props=cfg['boardpiece']['rb_props'],
-                                  asset_options=cfg['boardpiece']['asset_options']
-                                  )
-        default_board_shape_props = cfg['boardpiece']['shape_props'].copy()
-        default_board_shape_props["friction"] = rough_coef
-        default_color = cfg['boardpiece']['rb_props'].copy()
-        default_color['color'] = (0.5,0.8,0)
-        print(cfg['block']['dims'])
-        #self._n_inter_steps = cfg["env"]["n_inter_steps"]
-        self._board2 = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['boardpiece']['dims'],
-                                  shape_props=default_board_shape_props,
-                                  rb_props=default_color,
-                                  asset_options=cfg['boardpiece']['asset_options']
-                                  )
-        visual_block_color = default_color.copy()
-        visual_block_color['color'] = (1,0.1,0.7)
-        self._visual_block = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['block']['dims'],
-                                         shape_props=cfg['block']['shape_props'],
-                                         rb_props=visual_block_color,
-                                         asset_options=cfg['block']['asset_options']
-                                         )
-
-        #add 3 boards
-        self._board_name = "board1"
-        self._board2_name = "board2"
-        self._scene.add_asset(self._board_name, self._board, gymapi.Transform())
-        self._scene.add_asset(self._board2_name, self._board2, gymapi.Transform())
+        self._obstacle = None
+        if "obstacle" in cfg.keys():
+            self._obstacle = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg['obstacle']['dims'],
+                                      shape_props=cfg['obstacle']['shape_props'],
+                                      rb_props=cfg['obstacle']['rb_props'],
+                                      asset_options=cfg['obstacle']['asset_options']
+                                      )
+            self._obstacle_name="obstacle"
+        self._block_name = 'block'
         self._scene.add_asset(self._block_name, self._block, gymapi.Transform())
-        #default goal setting you need to
+        self._scene.add_asset(self._obstacle_name, self._obstacle, gymapi.Transform())
+        rough_coef = 0.9#0.5
+        self.dt = cfg['scene']['gym']['dt']
+        self._board_names = [name for name in cfg.keys() if "boardpiece" in name]
+        self._boards = []
+        for _board_name in self._board_names:
+            board = GymBoxAsset(self._scene.gym, self._scene.sim, **cfg[_board_name]['dims'],
+                                      shape_props=cfg[_board_name]['shape_props'],
+                                      rb_props=cfg[_board_name]['rb_props'],
+                                      asset_options=cfg[_board_name]['asset_options']
+                                      )
+            self._boards.append(board)
+            self._scene.add_asset(_board_name, board, gymapi.Transform())
+
         default_x = 0.1
         self.get_delta_goal(default_x)
 
@@ -92,7 +83,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             for env_index, env_ptr in enumerate(self._scene.env_ptrs):
                 ah = self._scene.ah_map[env_index][self._franka_name]
                 if env_index == 0:
-                    joint_angles = self._franka.get_joints(env_ptr, ah)
+                    joint_angles = self._frankas[env_index].get_joints(env_ptr, ah)
             np.save("data/push_joint_angles.npy", joint_angles)
 
     def get_states(self, env_idx =None):
@@ -145,46 +136,57 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
     def get_dists_to_goal(self):
         raise NotImplementedError
     def _reset(self, env_idxs=None):
-        self._pre_grasp_transforms = []
-        self._grasp_transforms = []
-        self._init_ee_transforms = []
+        #self._pre_grasp_transforms = []
+        #self._grasp_transforms = []
+        #self._init_ee_transforms = []
         if env_idxs is None:
             env_idxs = self._scene.env_ptrs
         super()._reset(env_idxs)
         for env_idx in env_idxs:
             env_ptr = self._scene.env_ptrs[env_idx]
             block_ah = self._scene.ah_map[env_idx][self._block_name]
-            board_ah = self._scene.ah_map[env_idx][self._board_name]
-            board2_ah = self._scene.ah_map[env_idx][self._board2_name]
+            #board2_ah = self._scene.ah_map[env_idx][self._board2_name]
             eps = 0.001
             block_pose = gymapi.Transform(
                 p=np_to_vec3(np.array([
-                    0.5,
-                    self._cfg['table']['dims']['height'] + self._cfg['block']['dims']['height'] / 2 + self._cfg['boardpiece']['dims']['height'] / 2+ 0.01,
-                    0.25]))
+                    self._cfg["block"]["pose"]["y"],
+                    self._cfg['table']['dims']['height'] + self._cfg['block']['dims']['height'] / 2 + self._cfg['boardpiece_blue1']['dims']['height'] / 2+ 0.01,
+                    self._cfg["block"]["pose"]["x"]]))
                 )
-            board_pose = gymapi.Transform(
-                p = np_to_vec3(np.array([
-                    0.5,
-                    self._cfg['table']['dims']['height'],
-                    0.18
-                ]))
-            )
-            board2_pose = transform_to_np(board_pose)
-            board2_pose[2] -= self._cfg['boardpiece']['dims']['depth']+0.001
-            board2_pose = gymapi.Transform(p=np_to_vec3(board2_pose))
+            for board_name in self._board_names:
+                board_pose = gymapi.Transform(
+                    p = np_to_vec3(np.array([
+                        self._cfg[board_name]["pose"]["y"],
+                        self._cfg['table']['dims']['height'],
+                        self._cfg[board_name]["pose"]["x"],
+                    ]))
+                )
+                board_ah = self._scene.ah_map[env_idx][board_name]
+                self._block.set_rb_transforms(env_ptr, board_ah, [board_pose])
+            if self._obstacle is not None:
+                obstacle_pose = gymapi.Transform(
+                    p = np_to_vec3(np.array([
+                        self._cfg[self._obstacle_name]["pose"]["y"],
+                        self._cfg['table']['dims']['height'] + self._cfg['obstacle']['dims']['height'] / 2 +
+                        self._cfg['boardpiece_blue1']['dims']['height'] / 2 + 0.01,
+                        self._cfg[self._obstacle_name]["pose"]["x"],
+                    ]))
+                )
+                obstacle_ah = self._scene.ah_map[env_idx][self._obstacle_name]
+                self._block.set_rb_transforms(env_ptr, obstacle_ah, [obstacle_pose])
 
             self._block.set_rb_transforms(env_ptr, block_ah, [block_pose])
-            self._block.set_rb_transforms(env_ptr, board_ah, [board_pose])
-            self._block.set_rb_transforms(env_ptr, board2_ah, [board2_pose])
+
         self._scene.render()
         self.goto_start(teleport=False)
 
     def _init_action_space(self, cfg):
         action_space = super()._init_action_space(cfg)
+        assert(len(self._init_ee_transforms) > 0)
         self.num_discrete_actions = 4
         self.discrete_actions_list = [[-0.02,1000],[-0.02,10],[-0.02,1000]]
         self.discrete_actions = {}
+
         i = 0
         for discrete_action in self.discrete_actions_list:
             self.discrete_actions[tuple(discrete_action)] = i
@@ -213,17 +215,17 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         return new_obs_space
     def _apply_actions(self, action, planning_env = False):
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
-            ee_pose = self._franka.get_ee_transform(env_ptr, self._franka_name)
+            ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
             np_pose = transform_to_np(ee_pose)[0:3]
             np_pose[2] += action[0]
             transformed_pt = gymapi.Transform(p=np_to_vec3(np.array(np_pose)), r = ee_pose.r);
             stiffness = action[1]
-            self._franka.set_attractor_props(env_index, env_ptr, self._franka_name,
+            self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
                                                 {
                                                     'stiffness': stiffness,
-                                                    'damping': 6 * np.sqrt(stiffness)
+                                                    'damping': 4 * np.sqrt(stiffness)
                                                 })
-            self._franka.set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
+            self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
 
     def _compute_obs(self, all_actions):
         all_obs = super()._compute_obs(all_actions)

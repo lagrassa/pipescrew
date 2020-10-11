@@ -3,7 +3,8 @@ import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor as GPR
 from sklearn.gaussian_process.kernels import Matern
 from sklearn import preprocessing
-
+from sklearn.ensemble import RandomForestRegressor as RFR
+from sklearn.model_selection import RandomizedSearchCV
 class BlockPushSimpleTransitionModel():
     def __init__(self):
         self.step = self.predict
@@ -20,13 +21,40 @@ class BlockPushSimpleTransitionModel():
         return next_state #ignore\\ln p(y_{i}|\\lambda(f_{i})) = -\\frac{N \\ln 2\\pi}{2} - \\frac{\\ln |K|}{2} - \\frac{(y_{i} - \\lambda(f_{i}))^{T}\\sigma^{-2}(y_{i} - \\lambda(f_{i}))}{2} stiffness
 
 class LearnedTransitionModel():
-    def __init__(self, fit_to_default = True):
-        self.high_state = np.array([0.1,0.1,0.1])
-        self.low_state = np.array([-0.1, -0.1, -0.1])
+    def __init__(self, fit_to_default = True, use_GP = False):
+        self.high_state = np.array([0.1])
+        self.low_state = np.array([-0.1])
         lengthscale = (self.high_state-self.low_state) * 0.001
-        self.k = gpy.kern.Matern52(self.high_state.shape[0], ARD=True, lengthscale=lengthscale)
-        self.k =  Matern()
-        self.model = GPR(kernel = self.k, random_state=0, optimizer="fmin_l_bfgs_b", n_restarts_optimizer = 200, normalize_y=True) #TODO fill in with better prior
+        #self.k = gpy.kern.Matern52(self.high_state.shape[0], ARD=True, lengthscale=lengthscale)
+        self.k =  Matern(length_scale= 0.4, length_scale_bounds=(0.00001, 1),nu=5/2.)
+        self.scaler = preprocessing.StandardScaler()
+        self.use_GP = use_GP
+        if use_GP:
+            self.model = GPR(kernel = self.k, random_state=17, optimizer="fmin_l_bfgs_b", n_restarts_optimizer = 200, normalize_y=True) #TODO fill in with better prior
+        else:
+            n_estimators = [int(x) for x in np.linspace(start=20, stop=1000, num=10)]
+            # Number of features to consider at every split
+            max_features = ['auto', 'sqrt']
+            # Maximum number of levels in tree
+            max_depth = [int(x) for x in np.linspace(10, 110, num=11)]
+            max_depth.append(None)
+            # Minimum number of samples required to split a node
+            min_samples_split = [2, 5, 10]
+            # Minimum number of samples required at each leaf node
+            min_samples_leaf = [1, 2, 4]
+            # Method of selecting samples for training each tree
+            bootstrap = [True, False]  # Create the random grid
+            rf = RFR()
+            random_grid = {'n_estimators': n_estimators,
+                           'max_features': max_features,
+                           'max_depth': max_depth,
+                           'min_samples_split': min_samples_split,
+                           'min_samples_leaf': min_samples_leaf,
+                           'bootstrap': bootstrap}
+            self.rf_random = RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=3, cv=3, verbose=0,
+                                           random_state=42, n_jobs=12)
+            self.model = self.rf_random
+
         self.states_fn = "data/states.npy"
         self.actions_fn = "data/actions.npy"
         self.next_states_fn = "data/next_states.npy"
@@ -37,8 +65,15 @@ class LearnedTransitionModel():
     def train_on_old_data_if_present(self):
         old_states, old_actions, old_next_states = self.load_data_if_present()
         if old_states is not None:
-            inputs = self.get_features(old_states, old_actions)
-            self.model.fit(inputs, old_next_states)
+            inputs = self.get_features(old_states, old_actions, train=True)
+            if self.model is None:
+                self.model = gpy.models.GPRegression(inputs, old_next_states[:,1].reshape(-1,1),self.k)
+                self.model['.*variance'].constrain_bounded(1e-4, 2., warning=False)
+                self.model['Gaussian_noise.variance'].constrain_bounded(1e-4, 0.1, warning=False)
+                for i in range(20):
+                    self.model.optimize(messages=True)
+                self.model.fit = lambda x,y: 3
+            self.model.fit(inputs, old_next_states[:,1])
 
 
     def load_data_if_present(self):
@@ -66,13 +101,14 @@ class LearnedTransitionModel():
             training_actions = actions
             training_next_states = next_states
 
-        inputs = self.get_features(training_states, training_actions)
+        inputs = self.get_features(training_states, training_actions, train=True)
         #self.model = gpy.models.GPRegression(inputs, next_states, self.k)
         #self.model['.*variance'].constrain_bounded(1e-1,2., warning=False)
         #self.model['Gaussian_noise.variance'].constrain_bounded(1e-4,0.01, warning=False)
         # These GP hyper parameters need to be calibrated for good uncertainty predictions.
         #self.model.optimize(messages=False)
-        self.model.fit(inputs, training_next_states)
+
+        self.model.fit(inputs, training_next_states[:, 1])
         if save_data:
             if not load_data:
                 if old_states is None:
@@ -92,31 +128,44 @@ class LearnedTransitionModel():
             np.save(self.next_states_fn, next_states_to_save)
 
 
-    def get_features(self, states, actions):
-        actions_rescaled = actions.copy()
-        scalar = 0.001
-        if len(actions_rescaled.shape) == 1:
-            actions_rescaled[-1] *= scalar
-        else:
-            actions_rescaled[:,-1] *= scalar
-
-        return preprocess(np.hstack([states, actions])) #all manual for now
+    def get_features(self, states, actions, train=False):
+        #unprocessed_input = np.hstack([states, actions])
+        unprocessed_input = states
+        if len(unprocessed_input.shape) == 1:
+            unprocessed_input = unprocessed_input.reshape(1,-1)
+        unprocessed_input = unprocessed_input[:,1].reshape(-1,1) #hack
+        if train:
+            self.scaler.fit(unprocessed_input)
+        return self.scaler.transform(unprocessed_input)
 
 
     #requires it be of shape N X M where N is number of samples
     def predict(self, states, actions, flatten=True):
+        #assuming same x
         inputs = self.get_features(states, actions)
-        if len(inputs.shape) == 1:
-            inputs = inputs.reshape(1,-1)
-        mean, sigma = self.model.predict(inputs, return_std=True)
-        action_dist = np.linalg.norm(mean-states)
-        if action_dist < 0.0001:
+        if self.use_GP:
+            try:
+                mean, sigma = self.model.predict(inputs, return_std=True)
+            except TypeError: #wrong GP library
+                mean, sigma = self.model.predict(inputs)
+        else:
+            try:
+                mean = self.model.predict(inputs)
+            except sklearn.exceptions.NotFittedError:
+                mean = self.model.predict(inputs)
+        if len(mean.shape) == 1:
+            mean = mean.reshape(-1,1)
+        if mean.shape[0] < mean.shape[1]:
+            mean = mean.T
+        if len(states.shape) == 1:
+            next_state = np.hstack([states[0], mean.flatten()])
+        else:
+            next_state = np.hstack([states[:,0].reshape(-1,1), mean.reshape(-1,1)])  # , 2*sigma
+        action_dist = np.linalg.norm(next_state-states)
+        if action_dist < 1e-3:
             print("Low action dist")
             print(states, "states")
-            print(actions, "actions")
-        if flatten:
-            return mean.flatten()
-        return mean #, 2*sigma
+        return next_state
 def preprocess(data):
     return preprocessing.scale(data)
 
