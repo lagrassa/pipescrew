@@ -227,9 +227,10 @@ def test_goto_side():
 
 def test_push_in_dir():
     vec_env, custom_draws = make_block_push_env(two_d=True)
-    amount = 0.1
-    T = 1
+    amount = 0.06
+    T = 500
     for i in range(4):
+        vec_env.goto_side(i)
         vec_env.push_in_dir(i, amount, T)
         input("OK?")
     #plot points where there was an anomaly
@@ -238,6 +239,7 @@ def test_push_in_dir():
 #test_learned_transition_model_real_data()
 #test_patched()
 #test_2D()
-test_goto_side()
+#test_goto_side()
+test_push_in_dir()
 #test_anomaly()
 #test_short_goal()

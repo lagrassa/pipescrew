@@ -24,9 +24,13 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
         self.max_steps_per_movement = 400
         super().__init__(cfg, n_inter_steps=cfg["env"]["n_inter_steps"], inter_step_cb=render_func, auto_reset_after_done=False)
-        urdf_fn = "/home/lagrassa/git/carbongym/assets/urdf/franka_description/robots/franka_panda.urdf"
-        urdf_fn="/home/lagrassa/git/planorparam/models/robots/model.urdf"
-        self.franka_chain = ikpy.chain.Chain.from_urdf_file(urdf_fn)
+        #urdf_fn = "/home/lagrassa/git/carbongym/assets/urdf/franka_description/robots/franka_panda.urdf"
+        #urdf_fn="/home/lagrassa/git/planorparam/models/robots/model.urdf"
+        #self.franka_chain = ikpy.chain.Chain.from_urdf_file(urdf_fn)
+        self.dir_to_rpy= {0:[-np.pi/2,np.pi/2,0],
+                          1:[-np.pi/2,np.pi/2,np.pi/2],
+                          2:[-np.pi/2,np.pi/2,np.pi],
+                          3:[-np.pi/2,np.pi/2,1.5*np.pi]}
 
         #super()._init_action_space(cfg)
     """
@@ -101,21 +105,17 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         2
         """
         #base is -1.57 1.57 1.56
-        dir_to_rpy= {0:[-np.pi/2,np.pi/2,0],
-                     1:[-np.pi/2,np.pi/2,np.pi/2],
-                     2:[-np.pi/2,np.pi/2,np.pi],
-                     3:[-np.pi/2,np.pi/2,1.5*np.pi]}
 
-        des_quat = rpy_to_quat(np.array(dir_to_rpy[dir]))
+        des_quat = rpy_to_quat(np.array(self.dir_to_rpy[dir]))
         delta_side= 0.02 + self._cfg["block"]["dims"]["width"]/2
         up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.05
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
             block_transform = self._block.get_rb_transforms(env_ptr, block_ah)[0]
             block_transform_trans = vec3_to_np(block_transform.p)
-            des_ee_trans = np.array([block_transform_trans[0]+delta_side*np.sin(dir_to_rpy[dir][2]),
+            des_ee_trans = np.array([block_transform_trans[0]+delta_side*np.sin(self.dir_to_rpy[dir][2]),
                                     block_transform_trans[1],
-                                    block_transform_trans[2]+delta_side*np.cos(dir_to_rpy[dir][2])])
+                                    block_transform_trans[2]+delta_side*np.cos(self.dir_to_rpy[dir][2])])
             up_des_ee_trans = des_ee_trans.copy()
             up_des_ee_trans[1] += up_offset
             #yzx
@@ -123,10 +123,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             transformed_pt = gymapi.Transform(p=np_to_vec3(des_ee_trans), r=des_quat)
             up_transformed_pt = gymapi.Transform(p=np_to_vec3(up_des_ee_trans), r=des_quat)
             self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
-                                                         {
-                                                             'stiffness': stiffness,
-                                                             'damping': 4 * np.sqrt(stiffness)
-                                                         })
+                                                         {'stiffness': stiffness,'damping': 4 * np.sqrt(stiffness)})
             ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
             if ee_pose.p.y < transformed_pt.p.y + up_offset:
                 np_ee_pose = transform_to_np(ee_pose, format="wxyz")
@@ -135,16 +132,19 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                 self.goto_pose(np_to_quat(np_ee_pose[3:], format="wxyz"), np_ee_pose[0:3], env_index, env_ptr, ee_pose)
             self.goto_pose(des_quat, up_des_ee_trans, env_index, env_ptr, up_transformed_pt)
             self.goto_pose(des_quat, des_ee_trans, env_index, env_ptr, transformed_pt)
-
-            #joint_angles = self.franka_chain.inverse_kinematics(des_ee_trans, dir_to_rpy[dir])[:-2]
+            self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
+                                                         {'stiffness': 500,'damping': 4 * np.sqrt(stiffness)})
+            #joint_angles = self.franka_chain.inverse_kinematics(des_ee_trans, self.dir_to_rpy[dir])[:-2]
             #self._frankas[env_index].set_joints(env_ptr, ah, joint_angles)
             #do this until stable
 
-    def goto_pose(self,des_quat, des_ee_trans, env_index, env_ptr, transformed_pt):
+    def goto_pose(self,des_quat, des_ee_trans, env_index, env_ptr, transformed_pt, max_t = None):
         pos_tol = 0.005
         quat_tol = 0.005
         self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
-        for i in range(self.max_steps_per_movement):
+        if max_t is None:
+            max_t = self.max_steps_per_movement
+        for i in range(max_t):
             self._scene.step()
             if i % 10:
                 self.render(custom_draws=custom_draws)
@@ -155,22 +155,54 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                                 Quaternion(np_pose[3:])) < quat_tol:
                     [(self._scene.step(), self.render(custom_draws=custom_draws)) for i in range(10)]
                     break
-            if i == self.max_steps_per_movement -1:
+            if i == max_t -1:
                 print("COuld not reach pose in time")
+        return i
 
-    def push_in_dir(self, dir, amount, T, stiffness=20):
+    def push_in_dir(self, dir, amount, T, stiffness=1000):
+        delta_t = 0.1
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
-            ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
-            np_pose = transform_to_np(ee_pose)[0:3]
-            #np_pose[2] += action[0]
-
-            transformed_pt = gymapi.Transform(p=np_to_vec3(np.array(np_pose)), r = ee_pose.r);
+            block_ah = self._scene.ah_map[env_index][self._block_name]
+            block_transform = self._block.get_rb_transforms(env_ptr, block_ah)[0]
+            block_start = transform_to_np(block_transform)
+            ee_start = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
+            np_ee_start = transform_to_np(ee_start)
+            des_quat = np_to_quat(np_ee_start[3:], format="wxyz")
+            block_desired = np.array([block_start[0]-amount*np.sin(self.dir_to_rpy[dir][2]),
+                                     block_start[1],
+                                     block_start[2]-amount*np.cos(self.dir_to_rpy[dir][2])])
+            t = 0
             self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
                                                          {
                                                              'stiffness': stiffness,
                                                              'damping': 4 * np.sqrt(stiffness)
                                                          })
-            self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
+            goal_tol = 0.01
+            while (t < T):
+                ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
+                np_pose = transform_to_np(ee_pose)[0:3]
+                block_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, block_ah)[0])
+                distance = np.linalg.norm(block_transform_np[:3]-block_desired)
+                print("Distance", distance)
+                des_ee_trans = np.array([np_pose[0]-distance*np.sin(self.dir_to_rpy[dir][2]),
+                                         np_pose[1],
+                                         np_pose[2]-distance*np.cos(self.dir_to_rpy[dir][2])])
+                #np_pose[2] += action[0]
+                transformed_pt = gymapi.Transform(p=np_to_vec3(des_ee_trans), r = ee_start.r);
+                self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
+                                                             {
+                                                                 'stiffness': stiffness,
+                                                                 'damping': 4 * np.sqrt(stiffness)
+                                                             })
+                self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
+
+                time_taken = self.goto_pose(des_quat, des_ee_trans, env_index, env_ptr, transformed_pt, max_t = T//10)
+                t += time_taken
+                if distance < goal_tol:
+                    break
+
+            #check if block is in right location
+
 
     def get_states(self, env_idx =None):
         """
