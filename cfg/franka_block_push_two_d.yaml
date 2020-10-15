@@ -96,7 +96,7 @@ obstacle:
         depth: 0.07
     pose:
         x: 0.20
-        y: 0.4
+        y: 0.3
     shape_props:
         friction: 1
         rolling_friction: 1

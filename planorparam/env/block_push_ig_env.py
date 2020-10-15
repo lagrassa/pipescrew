@@ -1,8 +1,10 @@
 import numpy as np
 from carbongym import gymapi
 from carbongym_utils.assets import GymFranka, GymBoxAsset, GymURDFAsset
-from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np
+from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, \
+    quat_to_rot, vec3_to_np
 import argparse
+import ikpy
 from autolab_core import YamlConfig
 from gym.spaces import Box, Discrete
 from carbongym_utils.draw import draw_transforms
@@ -20,7 +22,12 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
     def __init__(self, cfg):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
+        self.max_steps_per_movement = 400
         super().__init__(cfg, n_inter_steps=cfg["env"]["n_inter_steps"], inter_step_cb=render_func, auto_reset_after_done=False)
+        urdf_fn = "/home/lagrassa/git/carbongym/assets/urdf/franka_description/robots/franka_panda.urdf"
+        urdf_fn="/home/lagrassa/git/planorparam/models/robots/model.urdf"
+        self.franka_chain = ikpy.chain.Chain.from_urdf_file(urdf_fn)
+
         #super()._init_action_space(cfg)
     """
     IMPORTANT ASSUMPTION:
@@ -85,6 +92,85 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                 if env_index == 0:
                     joint_angles = self._frankas[env_index].get_joints(env_ptr, ah)
             np.save("data/push_joint_angles.npy", joint_angles)
+
+    def goto_side(self, dir, stiffness=1000):
+        """
+        Goes to the direction in "0,1,2,3"
+        0
+       3 1
+        2
+        """
+        #base is -1.57 1.57 1.56
+        dir_to_rpy= {0:[-np.pi/2,np.pi/2,0],
+                     1:[-np.pi/2,np.pi/2,np.pi/2],
+                     2:[-np.pi/2,np.pi/2,np.pi],
+                     3:[-np.pi/2,np.pi/2,1.5*np.pi]}
+
+        des_quat = rpy_to_quat(np.array(dir_to_rpy[dir]))
+        delta_side= 0.02 + self._cfg["block"]["dims"]["width"]/2
+        up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.05
+        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+            block_ah = self._scene.ah_map[env_index][self._block_name]
+            block_transform = self._block.get_rb_transforms(env_ptr, block_ah)[0]
+            block_transform_trans = vec3_to_np(block_transform.p)
+            des_ee_trans = np.array([block_transform_trans[0]+delta_side*np.sin(dir_to_rpy[dir][2]),
+                                    block_transform_trans[1],
+                                    block_transform_trans[2]+delta_side*np.cos(dir_to_rpy[dir][2])])
+            up_des_ee_trans = des_ee_trans.copy()
+            up_des_ee_trans[1] += up_offset
+            #yzx
+            #IK to compute joint angles
+            transformed_pt = gymapi.Transform(p=np_to_vec3(des_ee_trans), r=des_quat)
+            up_transformed_pt = gymapi.Transform(p=np_to_vec3(up_des_ee_trans), r=des_quat)
+            self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
+                                                         {
+                                                             'stiffness': stiffness,
+                                                             'damping': 4 * np.sqrt(stiffness)
+                                                         })
+            ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
+            if ee_pose.p.y < transformed_pt.p.y + up_offset:
+                np_ee_pose = transform_to_np(ee_pose, format="wxyz")
+                np_ee_pose[1] =  transformed_pt.p.y+up_offset
+                ee_pose.p.y = transformed_pt.p.y+up_offset
+                self.goto_pose(np_to_quat(np_ee_pose[3:], format="wxyz"), np_ee_pose[0:3], env_index, env_ptr, ee_pose)
+            self.goto_pose(des_quat, up_des_ee_trans, env_index, env_ptr, up_transformed_pt)
+            self.goto_pose(des_quat, des_ee_trans, env_index, env_ptr, transformed_pt)
+
+            #joint_angles = self.franka_chain.inverse_kinematics(des_ee_trans, dir_to_rpy[dir])[:-2]
+            #self._frankas[env_index].set_joints(env_ptr, ah, joint_angles)
+            #do this until stable
+
+    def goto_pose(self,des_quat, des_ee_trans, env_index, env_ptr, transformed_pt):
+        pos_tol = 0.005
+        quat_tol = 0.005
+        self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
+        for i in range(self.max_steps_per_movement):
+            self._scene.step()
+            if i % 10:
+                self.render(custom_draws=custom_draws)
+            if i % 50:
+                ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
+                np_pose = transform_to_np(ee_pose, format="wxyz")
+                if np.linalg.norm(des_ee_trans - np_pose[:3]) < pos_tol and Quaternion.absolute_distance(Quaternion(quat_to_np(des_quat, format="wxyz")),
+                                                Quaternion(np_pose[3:])) < quat_tol:
+                    [(self._scene.step(), self.render(custom_draws=custom_draws)) for i in range(10)]
+                    break
+            if i == self.max_steps_per_movement -1:
+                print("COuld not reach pose in time")
+
+    def push_in_dir(self, dir, amount, T, stiffness=20):
+        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+            ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
+            np_pose = transform_to_np(ee_pose)[0:3]
+            #np_pose[2] += action[0]
+
+            transformed_pt = gymapi.Transform(p=np_to_vec3(np.array(np_pose)), r = ee_pose.r);
+            self._frankas[env_index].set_attractor_props(env_index, env_ptr, self._franka_name,
+                                                         {
+                                                             'stiffness': stiffness,
+                                                             'damping': 4 * np.sqrt(stiffness)
+                                                         })
+            self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
 
     def get_states(self, env_idx =None):
         """
@@ -178,7 +264,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._block.set_rb_transforms(env_ptr, block_ah, [block_pose])
 
         self._scene.render()
-        self.goto_start(teleport=False)
+        #self.goto_start(teleport=False)
 
     def _init_action_space(self, cfg):
         action_space = super()._init_action_space(cfg)
@@ -213,6 +299,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         new_obs_space = Box(limits_low, limits_high, dtype=np.float32)
         self.num_features = obs_space.shape[0]
         return new_obs_space
+
     def _apply_actions(self, action, planning_env = False):
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)

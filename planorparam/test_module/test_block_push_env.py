@@ -20,6 +20,8 @@ def make_block_push_env(two_d = False):
     cfg = YamlConfig(cfg)
     vec_env = GymFrankaBlockPushEnv(cfg)
     vec_env.reset()
+    if not two_d:
+        vec_env.goto_start(teleport=False)
     def custom_draws(scene):
         franka = scene.get_asset('franka0')
         for env_ptr in scene.env_ptrs:
@@ -217,11 +219,25 @@ def test_2D():
                                             model_per_t=model_per_t, plot_deviations=True,
                                             computed_manual_states=manual_states)
     assert (len(deviations) < 2)
+def test_goto_side():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    for i in range(4):
+        vec_env.goto_side(i)
+        input("OK?")
+
+def test_push_in_dir():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    amount = 0.1
+    T = 1
+    for i in range(4):
+        vec_env.push_in_dir(i, amount, T)
+        input("OK?")
     #plot points where there was an anomaly
 #test_go_to_start()
 #test_learned_transition_model()
 #test_learned_transition_model_real_data()
 #test_patched()
-test_2D()
+#test_2D()
+test_goto_side()
 #test_anomaly()
 #test_short_goal()
