@@ -70,7 +70,10 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                       asset_options=cfg[_board_name]['asset_options']
                                       )
             self._boards.append(board)
-            self._scene.add_asset(_board_name, board, gymapi.Transform())
+            if "goal" in _board_name:
+                self._scene.add_asset(_board_name, board, gymapi.Transform(), collision_filter=3)
+            else:
+                self._scene.add_asset(_board_name, board, gymapi.Transform())
 
         default_x = 0.1
         self.get_delta_goal(default_x)

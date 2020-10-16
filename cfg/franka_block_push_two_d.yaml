@@ -196,5 +196,23 @@ boardpiece_redmiddle:
     asset_options:
         density: 300
         fix_base_link: True
+boardpiece_goal:
+    dims:
+        width: 0.08
+        height: 0.022
+        depth: 0.08
+    pose:
+        x: 0
+        y: 0.22
+    shape_props:
+        friction: 0.00
+        rolling_friction: 0.00
+        torsion_friction: 0.00
+        thickness: -1
+    rb_props:
+        color: [0.9,0.5, 0.2]
+    asset_options:
+        density: 3000
+        fix_base_link: True
 
 
