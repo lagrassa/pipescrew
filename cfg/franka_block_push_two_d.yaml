@@ -95,7 +95,7 @@ obstacle:
         height: 0.07
         depth: 0.07
     pose:
-        x: 0.20
+        x: -0.20
         y: 0.3
     shape_props:
         friction: 1

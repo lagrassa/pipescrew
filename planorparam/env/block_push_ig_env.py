@@ -108,7 +108,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
         des_quat = rpy_to_quat(np.array(self.dir_to_rpy[dir]))
         delta_side= 0.02 + self._cfg["block"]["dims"]["width"]/2
-        up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.05
+        up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.06
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
             block_transform = self._block.get_rb_transforms(env_ptr, block_ah)[0]
@@ -263,6 +263,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         for env_idx in env_idxs:
             env_ptr = self._scene.env_ptrs[env_idx]
             block_ah = self._scene.ah_map[env_idx][self._block_name]
+            self._frankas[env_idx].set_gripper_width(env_ptr, self._scene.ah_map[env_idx][self._franka_name], 0.02)
             #board2_ah = self._scene.ah_map[env_idx][self._board2_name]
             eps = 0.001
             block_pose = gymapi.Transform(
