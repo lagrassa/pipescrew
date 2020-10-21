@@ -5,12 +5,52 @@ from sklearn.gaussian_process.kernels import Matern
 from sklearn import preprocessing
 from sklearn.ensemble import RandomForestRegressor as RFR
 from sklearn.model_selection import RandomizedSearchCV
+from autolab_core import YamlConfig
+
+def color_block_is_on(cfg, pose):
+    #return the first color that the block is on.
+    board_names = [name for name in cfg.keys() if "boardpiece" in name]
+    for board_name in board_names:
+        center = np.array([cfg[board_name]['pose']['y'], 0,cfg[board_name]['pose']['x'],]) #yzx
+        width = cfg[board_name]['dims']['width'],
+        depth = cfg[board_name]['dims']['depth'],
+        if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
+            if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
+                return cfg[board_name]["rb_props"]["color"]
+
 class BlockPushSimpleTransitionModel():
-    def __init__(self):
+    def __init__(self, config_fn = "cfg/franka_block_push_two_d.yaml"):
         self.step = self.predict
-
-
+        self.cfg = YamlConfig(config_fn)
+        self.dir_to_rpy= {0:[-np.pi/2,np.pi/2,0],
+                          1:[-np.pi/2,np.pi/2,np.pi/2],
+                          2:[-np.pi/2,np.pi/2,np.pi],
+                          3:[-np.pi/2,np.pi/2,1.5*np.pi]}
+    """
+    Pillar State object
+    action = dir, amount, T. 
+    """
     def predict(self, state, action):
+        new_state = state.copy()
+        #take current state
+        dir = action[0]
+        amount = action[1]
+        T = action[2]
+        robot_pos_fqn = "frame:pose/position"
+        robot_orn_fqn = "frame:pose/quaternion"
+        block_pos_fqn = "frame:block:pose/position"
+
+        #precondition is that the robot is at the appropriate side, taken care of at another layer of abstraction
+        #if robot is "below" block, otherwise it's the same
+        current_block_state = state.get_values_from_vec([block_pos_fqn])
+        next_block_state_np = np.array([current_block_state[0] - amount * np.sin(self.dir_to_rpy[dir][2]),
+                             current_block_state[1],
+                             current_block_state[2] - amount * np.cos(self.dir_to_rpy[dir][2])])
+        new_state.set_values_from_vec([block_pos_fqn],[next_block_state_np])
+        return new_state
+
+
+    def predict_simple(self, state, action):
         next_state = state.copy()
         if action[-1] < 5:
             return next_state #stiffness too low; won't move anywhere

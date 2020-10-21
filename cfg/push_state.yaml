@@ -1,0 +1,27 @@
+state:
+# door frame, door panel, and door handle
+  - frame:pose/position:
+    - values: [0., 0., 0.]
+      value_names: ['x', 'y', 'z']
+  - frame:pose/quaternion:
+    - values: [1., 0., 0., 0.]
+      value_names: ['w', 'x', 'y', 'z']
+  - frame:color:
+    - values: [0., 0., 0.]
+      value_names: ['r', 'g', 'b']
+  - frame:block:pose/position:
+    - values: [0., 0., 0.]
+      value_names: ['x', 'y', 'z']
+  - frame:block:pose/quaternion:
+    - values: [1., 0., 0., 0.]
+      value_names: ['w', 'x', 'y', 'z']
+  - frame:block:color:
+    - values: [0., 0., 0.]
+      value_names: ['r', 'g', 'b']
+  - frame:block:on_color:
+      - values: [0., 0., 0.]
+        value_names: ['r', 'g', 'b']
+  - constants/gravity_accel_const:
+    - values: 9.80665
+  - constants/pi:
+    - values: 3.14159

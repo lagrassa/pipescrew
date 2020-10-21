@@ -8,6 +8,7 @@ from carbongym_utils.draw import draw_transforms
 from env.block_push_ig_env import GymFrankaBlockPushEnv
 from planning.blockpushpolicy import BlockPushPolicy
 from planning.transition_models import LearnedTransitionModel, BlockPushSimpleTransitionModel
+from planning.operators import      *
 
 def make_block_push_env(two_d = False):
     parser = argparse.ArgumentParser()
@@ -233,13 +234,49 @@ def test_push_in_dir():
         vec_env.goto_side(i)
         vec_env.push_in_dir(i, amount, T)
         input("OK?")
+def test_blue_only():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    actions = []
+    dir = 1
+    dir_next = 0
+    max_T = 500
+    actions.append(GoToSide(dir))
+    actions.append(PushInDir(dir,0.1,max_T))
+    actions.append(PushInDir(dir,0.1,max_T))
+    actions.append(PushInDir(dir,0.08,max_T))
+    actions.append(GoToSide(dir_next))
+    actions.append(PushInDir(dir_next,0.1,max_T*2))
+    actions.append(PushInDir(dir_next,0.1,max_T*2))
+    for action in actions:
+        action.execute_prim(vec_env)
+    input("OK?")
+
+def test_red():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    actions = []
+    max_T = 500
+    actions.append(GoToSide(0))
+    actions.append(PushInDir(0, 0.1, max_T))
+    actions.append(PushInDir(0, 0.1, max_T))
+    actions.append(GoToSide(1))
+    actions.append(PushInDir(1, 0.1, max_T))
+    actions.append(PushInDir(1, 0.1, max_T))
+    for action in actions:
+        action.execute_prim(vec_env)
+    input("OK?")
+def test_pillar_state():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    vec_env.get_pillar_state()
+
     #plot points where there was an anomaly
 #test_go_to_start()
 #test_learned_transition_model()
 #test_learned_transition_model_real_data()
 #test_patched()
 #test_2D()
-#test_goto_side()
-test_push_in_dir()
+#test_goto_side()#test_push_in_dir()
+#test_blue_only()
+#test_red()
+test_pillar_state()
 #test_anomaly()
 #test_short_goal()

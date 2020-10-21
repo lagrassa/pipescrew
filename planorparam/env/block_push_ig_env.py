@@ -10,6 +10,9 @@ from gym.spaces import Box, Discrete
 from carbongym_utils.draw import draw_transforms
 from pyquaternion import Quaternion
 from carbongym_utils.rl.franka_vec_env import GymFrankaVecEnv
+#from pillar_state_py import State
+State = None
+from simple_zmq import SimpleZMQServer
 
 
 def custom_draws(scene):
@@ -31,7 +34,11 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                           1:[-np.pi/2,np.pi/2,np.pi/2],
                           2:[-np.pi/2,np.pi/2,np.pi],
                           3:[-np.pi/2,np.pi/2,1.5*np.pi]}
-
+        self.ip = "127.0.0.1"
+        self.port = "5555"
+        self.state_server = SimpleZMQServer(self.ip, self.port)
+        #self.pillar_states = [State.create_from_yaml_file("cfg/push_state.yaml") for _ in range(cfg["scene"]["n_envs"])]
+        self.pillar_states = []
         #super()._init_action_space(cfg)
     """
     IMPORTANT ASSUMPTION:
@@ -77,6 +84,32 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
         default_x = 0.1
         self.get_delta_goal(default_x)
+    """
+    Returns list of State objects for each env
+    """
+    def get_pillar_state(self):
+        #state = State.create_from_serialized_string(self.state_server.recv())
+        self._update_state()
+        return [state.get_serialized_string() for state in self.pillar_states]
+
+    def _update_state(self):
+        robot_pos_fqn = "frame:pose/position"
+        robot_orn_fqn = "frame:pose/quaternion"
+        block_pos_fqn = "frame:block:pose/position"
+        block_orn_fqn = "frame:block:pose/quaternion"
+        block_on_color_fqn ="frame:block:on_color"
+        for env_index, env_ptr in enumerate(self._scene.env_ptrs):
+            block_ah = self._scene.ah_map[env_index][self._block_name]
+            block_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, block_ah)[0], format="wxyz")
+            ee_pose_np = transform_to_np(self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name), format="wxyz")
+            #all_cts = self._scene.gym.get_rigid_contacts(self._scene._sim) # check for between block and board
+            #all_cts = all_cts[all_cts['env0'] != -1 & np.logical_not(np.isclose(all_cts['lambda'], 0))]
+            self.pillar_states[env_index].set_values_from_vec([robot_pos_fqn, robot_orn_fqn], [ee_pose_np[:3], ee_pose_np[3:]])
+            self.pillar_states[env_index].set_values_from_vec([block_pos_fqn, block_orn_fqn], [block_transform_np[:3], block_transform_np[3:]])
+            color = color_block_is_on(self._cfg, block_transform_np)
+            self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], [color])
+
+
 
     def goto_start(self, teleport=False):
         if teleport:
@@ -143,7 +176,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
     def goto_pose(self,des_quat, des_ee_trans, env_index, env_ptr, transformed_pt, max_t = None):
         pos_tol = 0.005
-        quat_tol = 0.005
+        quat_tol = 1.5
         self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
         if max_t is None:
             max_t = self.max_steps_per_movement
@@ -151,7 +184,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._scene.step()
             if i % 10:
                 self.render(custom_draws=custom_draws)
-            if i % 50:
+            if i % 20:
                 ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
                 np_pose = transform_to_np(ee_pose, format="wxyz")
                 if np.linalg.norm(des_ee_trans - np_pose[:3]) < pos_tol and Quaternion.absolute_distance(Quaternion(quat_to_np(des_quat, format="wxyz")),
@@ -159,10 +192,10 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                     [(self._scene.step(), self.render(custom_draws=custom_draws)) for i in range(10)]
                     break
             if i == max_t -1:
-                print("COuld not reach pose in time")
+                print("COuld not reach pose in time, distance still {} after time {}".format(np.linalg.norm(des_ee_trans - np_pose[:3]), i))
         return i
 
-    def push_in_dir(self, dir, amount, T, stiffness=1000):
+    def push_in_dir(self, dir, amount, T, stiffness=1200):
         delta_t = 0.1
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
@@ -180,13 +213,13 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                                              'stiffness': stiffness,
                                                              'damping': 4 * np.sqrt(stiffness)
                                                          })
-            goal_tol = 0.01
+            goal_tol = 0.02
             while (t < T):
                 ee_pose = self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name)
                 np_pose = transform_to_np(ee_pose)[0:3]
                 block_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, block_ah)[0])
                 distance = np.linalg.norm(block_transform_np[:3]-block_desired)
-                print("Distance", distance)
+                #print("Distance", distance)
                 des_ee_trans = np.array([np_pose[0]-distance*np.sin(self.dir_to_rpy[dir][2]),
                                          np_pose[1],
                                          np_pose[2]-distance*np.cos(self.dir_to_rpy[dir][2])])
@@ -199,7 +232,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
                                                              })
                 self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
 
-                time_taken = self.goto_pose(des_quat, des_ee_trans, env_index, env_ptr, transformed_pt, max_t = T//10)
+                time_taken = self.goto_pose(des_quat, des_ee_trans, env_index, env_ptr, transformed_pt, max_t = T//5)
                 t += time_taken
                 if distance < goal_tol:
                     break
@@ -403,3 +436,14 @@ if __name__ == "__main__":
         if t == 100:
             vec_env.reset()
             t = 0
+
+def color_block_is_on(cfg, pose):
+    #return the first color that the block is on.
+    board_names = [name for name in cfg.keys() if "boardpiece" in name]
+    for board_name in board_names:
+        center = np.array([cfg[board_name]['pose']['y'], 0,cfg[board_name]['pose']['x'],]) #yzx
+        width = cfg[board_name]['dims']['width'],
+        depth = cfg[board_name]['dims']['depth'],
+        if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
+            if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
+                return cfg[board_name]["rb_props"]["color"]
