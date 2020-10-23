@@ -4,14 +4,12 @@ from carbongym_utils.assets import GymFranka, GymBoxAsset, GymURDFAsset
 from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, \
     quat_to_rot, vec3_to_np
 import argparse
-import ikpy
 from autolab_core import YamlConfig
 from gym.spaces import Box, Discrete
 from carbongym_utils.draw import draw_transforms
 from pyquaternion import Quaternion
 from carbongym_utils.rl.franka_vec_env import GymFrankaVecEnv
-#from pillar_state_py import State
-State = None
+from pillar_state_py import State
 from simple_zmq import SimpleZMQServer
 
 
@@ -37,8 +35,8 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         self.ip = "127.0.0.1"
         self.port = "5555"
         self.state_server = SimpleZMQServer(self.ip, self.port)
-        #self.pillar_states = [State.create_from_yaml_file("cfg/push_state.yaml") for _ in range(cfg["scene"]["n_envs"])]
-        self.pillar_states = []
+        self.pillar_states = [State.create_from_yaml_file("cfg/push_state.yaml") for _ in range(cfg["scene"]["n_envs"])]
+        #self.pillar_states = []
         #super()._init_action_space(cfg)
     """
     IMPORTANT ASSUMPTION:
@@ -104,10 +102,12 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             ee_pose_np = transform_to_np(self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name), format="wxyz")
             #all_cts = self._scene.gym.get_rigid_contacts(self._scene._sim) # check for between block and board
             #all_cts = all_cts[all_cts['env0'] != -1 & np.logical_not(np.isclose(all_cts['lambda'], 0))]
-            self.pillar_states[env_index].set_values_from_vec([robot_pos_fqn, robot_orn_fqn], [ee_pose_np[:3], ee_pose_np[3:]])
-            self.pillar_states[env_index].set_values_from_vec([block_pos_fqn, block_orn_fqn], [block_transform_np[:3], block_transform_np[3:]])
+            self.pillar_states[env_index].set_values_from_vec([robot_pos_fqn], ee_pose_np[:3].tolist())
+            self.pillar_states[env_index].set_values_from_vec([robot_orn_fqn], ee_pose_np[3:].tolist())
+            self.pillar_states[env_index].set_values_from_vec([block_pos_fqn], block_transform_np[:3].tolist())
+            self.pillar_states[env_index].set_values_from_vec([block_orn_fqn], block_transform_np[3:].tolist())
             color = color_block_is_on(self._cfg, block_transform_np)
-            self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], [color])
+            self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], color)
 
 
 
@@ -444,6 +444,10 @@ def color_block_is_on(cfg, pose):
         center = np.array([cfg[board_name]['pose']['y'], 0,cfg[board_name]['pose']['x'],]) #yzx
         width = cfg[board_name]['dims']['width'],
         depth = cfg[board_name]['dims']['depth'],
+        if isinstance(width, tuple):
+            width = width[0]
+        if isinstance(depth, tuple):
+            depth = depth[0]
         if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
             if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
                 return cfg[board_name]["rb_props"]["color"]

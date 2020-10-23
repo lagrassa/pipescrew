@@ -1,7 +1,7 @@
 scene:
     n_envs: 2
     es: 1
-    gui: 1
+    gui: 0
     gym:
       dt: 0.01
       substeps: 4
