@@ -6,6 +6,7 @@ from sklearn import preprocessing
 from sklearn.ensemble import RandomForestRegressor as RFR
 from sklearn.model_selection import RandomizedSearchCV
 from autolab_core import YamlConfig
+from pillar_state_py import State
 
 def color_block_is_on(cfg, pose):
     #return the first color that the block is on.
@@ -30,8 +31,9 @@ class BlockPushSimpleTransitionModel():
     Pillar State object
     action = dir, amount, T. 
     """
-    def predict(self, state, action):
-        new_state = state.copy()
+    def predict(self, state_str, action):
+        state = State.create_from_serialized_string(state_str)
+        new_state = State.create_from_serialized_string(state_str)
         #take current state
         dir = action[0]
         amount = action[1]
@@ -42,12 +44,12 @@ class BlockPushSimpleTransitionModel():
 
         #precondition is that the robot is at the appropriate side, taken care of at another layer of abstraction
         #if robot is "below" block, otherwise it's the same
-        current_block_state = state.get_values_from_vec([block_pos_fqn])
+        current_block_state = state.get_values_as_vec([block_pos_fqn])
         next_block_state_np = np.array([current_block_state[0] - amount * np.sin(self.dir_to_rpy[dir][2]),
                              current_block_state[1],
                              current_block_state[2] - amount * np.cos(self.dir_to_rpy[dir][2])])
-        new_state.set_values_from_vec([block_pos_fqn],[next_block_state_np])
-        return new_state
+        new_state.set_values_from_vec([block_pos_fqn],next_block_state_np.tolist())
+        return new_state.get_serialized_string()
 
 
     def predict_simple(self, state, action):

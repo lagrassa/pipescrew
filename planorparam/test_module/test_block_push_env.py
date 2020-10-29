@@ -1,5 +1,6 @@
 import argparse
 import matplotlib.pyplot as plt
+from agent.agent import Agent
 from agent.model_selection import ModelSelector
 
 import numpy as np
@@ -236,39 +237,95 @@ def test_push_in_dir():
         input("OK?")
 def test_blue_only():
     vec_env, custom_draws = make_block_push_env(two_d=True)
+    actions = blue_skeleton()
+    for action in actions:
+        action.monitor_execution(vec_env)
+    input("OK?")
+
+
+def blue_skeleton():
     actions = []
     dir = 1
     dir_next = 0
     max_T = 500
+    cfg = {"data_path": "data/blueonly/"}
     actions.append(GoToSide(dir))
-    actions.append(PushInDir(dir,0.1,max_T))
-    actions.append(PushInDir(dir,0.1,max_T))
-    actions.append(PushInDir(dir,0.08,max_T))
+    actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
+    actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
+    actions.append(PushInDir(dir, 0.08, max_T, cfg=cfg))
     actions.append(GoToSide(dir_next))
-    actions.append(PushInDir(dir_next,0.1,max_T*2))
-    actions.append(PushInDir(dir_next,0.1,max_T*2))
-    for action in actions:
-        action.execute_prim(vec_env)
-    input("OK?")
+    actions.append(PushInDir(dir_next, 0.1, max_T * 2, cfg=cfg))
+    actions.append(PushInDir(dir_next, 0.1, max_T * 2, cfg=cfg))
+    return actions
+
 
 def test_red():
     vec_env, custom_draws = make_block_push_env(two_d=True)
+    actions = red_skeleton()
+    for action in actions:
+        action.monitor_execution(vec_env)
+    input("OK?")
+
+
+def red_skeleton():
     actions = []
     max_T = 500
+    cfg = {"data_path": "data/red/"}
     actions.append(GoToSide(0))
-    actions.append(PushInDir(0, 0.1, max_T))
-    actions.append(PushInDir(0, 0.1, max_T))
+    actions.append(PushInDir(0, 0.09, max_T, cfg=cfg))
+    actions.append(PushInDir(0, 0.11, max_T, cfg=cfg))
     actions.append(GoToSide(1))
-    actions.append(PushInDir(1, 0.1, max_T))
-    actions.append(PushInDir(1, 0.1, max_T))
+    actions.append(PushInDir(1, 0.09, max_T, cfg=cfg))
+    actions.append(PushInDir(1, 0.11, max_T, cfg=cfg))
+    return actions
+
+
+def test_green():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    actions = green_skeleton()
     for action in actions:
-        action.execute_prim(vec_env)
+        action.monitor_execution(vec_env)
     input("OK?")
+
+
+def green_skeleton():
+    actions = []
+    max_T = 500
+    cfg = {"data_path": "data/green/"}
+    actions.append(GoToSide(0))
+    actions.append(PushInDir(0, 0.09, max_T, cfg=cfg))
+    actions.append(PushInDir(0, 0.11, max_T, cfg=cfg))
+    actions.append(PushInDir(0, 0.11, max_T, cfg=cfg))
+    actions.append(PushInDir(0, 0.11, max_T, cfg=cfg))
+    actions.append(GoToSide(1))
+    for i in range(14):
+        actions.append(PushInDir(1, 0.02, max_T, cfg=cfg))
+    actions.append(GoToSide(2))
+    actions.append(PushInDir(2, 0.11, max_T, cfg=cfg))
+    actions.append(PushInDir(2, 0.11, max_T, cfg=cfg))
+    return actions
+
+
 def test_pillar_state():
     vec_env, custom_draws = make_block_push_env(two_d=True)
     vec_env.get_pillar_state()
 
-    #plot points where there was an anomaly
+def test_agent_collect_info():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    red_plan = red_skeleton()
+    green_plan = green_skeleton()
+    blue_plan = blue_skeleton()
+    #plans = [blue_plan, green_plan, red_plan]
+    plans = [green_plan]
+    agent = Agent("test_collect_info")
+    agent.collect_transition_data(vec_env, plans)
+
+def test_agent_classify():
+    agent = Agent("test_collect_info_gptest")
+    agent.train_classifier()
+
+
+#plot points where there was an anomaly
 #test_go_to_start()
 #test_learned_transition_model()
 #test_learned_transition_model_real_data()
@@ -276,7 +333,8 @@ def test_pillar_state():
 #test_2D()
 #test_goto_side()#test_push_in_dir()
 #test_blue_only()
-#test_red()
-test_pillar_state()
+#test_agent_collect_info()
+test_agent_classify()
+#test_pillar_state()
 #test_anomaly()
 #test_short_goal()

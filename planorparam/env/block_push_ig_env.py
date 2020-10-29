@@ -110,7 +110,6 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], color)
 
 
-
     def goto_start(self, teleport=False):
         if teleport:
             for env_index, env_ptr in enumerate(self._scene.env_ptrs):
@@ -144,7 +143,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
 
         des_quat = rpy_to_quat(np.array(self.dir_to_rpy[dir]))
         delta_side= 0.02 + self._cfg["block"]["dims"]["width"]/2
-        up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.06
+        up_offset = self._cfg["block"]["dims"]["height"] / 2 + 0.07
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
             block_transform = self._block.get_rb_transforms(env_ptr, block_ah)[0]
