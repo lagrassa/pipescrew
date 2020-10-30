@@ -21,7 +21,17 @@ state:
   - frame:block:on_color:
       - values: [0., 0., 0.]
         value_names: ['r', 'g', 'b']
+  - frame:obstacle/position:
+      - values: [0., 0., 0.]
+        value_names: ['x', 'y', 'z']
+  - frame:obstacle/quaternion:
+      - values: [1., 0., 0., 0.]
+        value_names: ['w', 'x', 'y', 'z']
   - constants/gravity_accel_const:
     - values: 9.80665
   - constants/pi:
     - values: 3.14159
+  - constants/block_width: #make sure to also update in other yaml file
+      - values: 0.07
+  - constants/obstacle_width: #make sure to also update in other yaml file
+      - values: 0.07

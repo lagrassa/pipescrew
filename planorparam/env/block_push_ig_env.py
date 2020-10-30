@@ -95,10 +95,14 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         robot_orn_fqn = "frame:pose/quaternion"
         block_pos_fqn = "frame:block:pose/position"
         block_orn_fqn = "frame:block:pose/quaternion"
+        obs_pos_fqn = "frame:obstacle:pose/position"
+        obs_orn_fqn = "frame:obstacle:pose/quaternion"
         block_on_color_fqn ="frame:block:on_color"
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
+            obs_ah = self._scene.ah_map[env_index][self._obstacle_name]
             block_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, block_ah)[0], format="wxyz")
+            obs_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, obs_ah)[0], format="wxyz")
             ee_pose_np = transform_to_np(self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name), format="wxyz")
             #all_cts = self._scene.gym.get_rigid_contacts(self._scene._sim) # check for between block and board
             #all_cts = all_cts[all_cts['env0'] != -1 & np.logical_not(np.isclose(all_cts['lambda'], 0))]
@@ -106,6 +110,8 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self.pillar_states[env_index].set_values_from_vec([robot_orn_fqn], ee_pose_np[3:].tolist())
             self.pillar_states[env_index].set_values_from_vec([block_pos_fqn], block_transform_np[:3].tolist())
             self.pillar_states[env_index].set_values_from_vec([block_orn_fqn], block_transform_np[3:].tolist())
+            self.pillar_states[env_index].set_values_from_vec([obs_pos_fqn], obs_transform_np[:3].tolist())
+            self.pillar_states[env_index].set_values_from_vec([obs_orn_fqn], obs_transform_np[3:].tolist())
             color = color_block_is_on(self._cfg, block_transform_np)
             self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], color)
 
