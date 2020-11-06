@@ -55,6 +55,22 @@ class Agent:
         print("Error", np.linalg.norm(deviations_pred-deviations))
         # Input space
         if plot_classification:
+            from autolab_core import YamlConfig
+            import matplotlib.patches
+            cfg = YamlConfig("cfg/franka_block_push_two_d.yaml")
+            self._board_names = [name for name in cfg.keys() if "boardpiece" in name]
+            fig = plt.figure(figsize=(10,10))
+            ax = fig.add_subplot(111)
+            for _board_name in self._board_names:
+                color = cfg[_board_name]['rb_props']["color"]
+                pose = [cfg[_board_name]["pose"]["x"], cfg[_board_name]["pose"]["y"]]
+                dims = [cfg[_board_name]["dims"]["depth"], cfg[_board_name]["dims"]["width"]]
+                #draw them.
+                pose[0] -= (dims[0]/2.)
+                pose[1] -= (dims[1]/2.)
+                patch = matplotlib.patches.Rectangle(pose, dims[0], dims[1], fill=False, edgecolor=color, linewidth=20)
+                if True or color == [0.0, 0.0, 0.7]:
+                    ax.add_patch(patch)
             X = varying_input_vec
             y = deviations
             num_pts = 100
@@ -71,14 +87,12 @@ class Agent:
             # Zp = [gp.predict([(X0p[i, j], X1p[i, j]) for i in range(X0p.shape[0])]) for j in range(X0p.shape[1])]
             # Zp = np.array(Zp).T
 
-            fig = plt.figure(figsize=(10,8))
-            ax = fig.add_subplot(111)
             ax.pcolormesh(X0p, X1p, Zp, cmap="Greens", vmin=-0.01)
             #ax.scatter(X0p, X1p, c=Zp, cmap="Greens", vmin=-0.1)
             plot = ax.scatter(X[:,0], X[:,1], c=deviations, cmap="Greens", vmin=-0.01, edgecolor="k")
             #ax.scatter(X[:,0], X[:,1], c=deviations_pred, cmap="Greens", vmin=-0.05)
             x_max = 0.3
-            x_min = -0.2
+            x_min = -0.3
             z_max = 0.6
             z_min = 0.1
             plt.xlim([x_max, x_min])
