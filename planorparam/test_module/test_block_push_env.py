@@ -10,6 +10,8 @@ from env.block_push_ig_env import GymFrankaBlockPushEnv
 from planning.blockpushpolicy import BlockPushPolicy
 from planning.transition_models import LearnedTransitionModel, BlockPushSimpleTransitionModel
 from planning.operators import      *
+from planning.planner import Planner
+from pillar_state_py import State
 
 def make_block_push_env(two_d = False):
     parser = argparse.ArgumentParser()
@@ -323,6 +325,16 @@ def test_agent_collect_info():
 def test_agent_classify():
     agent = Agent("test_collect_info_gptest")
     agent.train_classifier()
+def test_planner():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    start_state_str = vec_env.get_pillar_state()[0]
+    start_state = State.create_from_serialized_string(start_state_str)
+    goal_state = State.create_from_serialized_string(start_state_str)
+    goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
+    goal_pose[0] -= 0.05
+    goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
+    planner = Planner()
+    planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
 
 
 #plot points where there was an anomaly
@@ -334,7 +346,9 @@ def test_agent_classify():
 #test_goto_side()#test_push_in_dir()
 #test_blue_only()
 #test_agent_collect_info()
-test_agent_classify()
+#test_agent_classify()
+#test_red()
+test_planner()
 #test_pillar_state()
 #test_anomaly()
 #test_short_goal()

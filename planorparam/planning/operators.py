@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from planning.transition_models import BlockPushSimpleTransitionModel
+from planning.transition_models import BlockPushSimpleTransitionModel, GoToSideTransitionModel
 from pillar_state_py import State
 from carbongym_utils.math_utils import rpy_to_quat, quat_to_rpy, quat_to_np
 from pyquaternion import Quaternion
@@ -70,6 +70,7 @@ class GoToSide(Operator):
     deviations = []
     def __init__(self, sidenum, cfg=None):
         self.sidenum = sidenum
+        self._transition_model = GoToSideTransitionModel()
         super().__init__(cfg=cfg)
     def execute_prim(self, env):
         return env.goto_side(self.sidenum)
@@ -81,9 +82,11 @@ class GoToSide(Operator):
     def pillar_state_to_feature(self,pillar_state):
         return []
     def transition_model(self, state, action):
-        return state
+        return self._transition_model.predict(state, action)
     def cost(self):
         return 1
+    def __str__(self):
+        return self.__class__.__name__ + " "+ str(self.sidenum)
 
 class PushInDir(Operator):
     def __init__(self, sidenum, amount, T, cfg=None):
@@ -100,19 +103,18 @@ class PushInDir(Operator):
     def precond(self, state_str):
         state = State.create_from_serialized_string(state_str)
         robot_pos = state.get_values_as_vec([robot_pos_fqn])
-        robot_orn = state.get_values_as_vec([robot_orn_fqn])
+        robot_orn = np.array(state.get_values_as_vec([robot_orn_fqn]))
         block_pos = state.get_values_as_vec([block_pos_fqn])
-        delta_side = state.get_values_as_vec(["constants/block_width"])/2
+        delta_side = state.get_values_as_vec(["constants/block_width"])[0]/2
         #close to block side and also in right orientation
-        robot_des_pos = np.array([block_pos[0] + delta_side * np.sin(dir_to_rpy[dir][2]),
+        robot_des_pos = np.array([block_pos[0] + delta_side * np.sin(dir_to_rpy[self.sidenum][2]),
                                  block_pos[1],
-                                 block_pos[2] + delta_side * np.cos(dir_to_rpy[dir][2])])
+                                 block_pos[2] + delta_side * np.cos(dir_to_rpy[self.sidenum][2])])
         gripper_pos_close = np.linalg.norm(robot_des_pos-robot_pos < 0.03)
-        des_quat = quat_to_np(rpy_to_quat(np.array(self.dir_to_rpy[dir])), format="wxyz")
-        orn_dist = Quaternion.absolute_distance(des_quat, robot_orn)
+        des_quat = quat_to_np(rpy_to_quat(np.array(dir_to_rpy[self.sidenum])), format="wxyz")
+        orn_dist = Quaternion.absolute_distance(Quaternion(des_quat), Quaternion(robot_orn))
         orn_close = orn_dist < 0.01
         return gripper_pos_close and orn_close
-
 
     def transition_model(self, state, action):
         return self._transition_model.predict(state, action)
@@ -125,5 +127,4 @@ class PushInDir(Operator):
         pillar_state = State.create_from_serialized_string(pillar_state_str)
         states = np.array(pillar_state.get_values_as_vec([block_pos_fqn, block_on_color_fqn]))
         return states.flatten()
-
 

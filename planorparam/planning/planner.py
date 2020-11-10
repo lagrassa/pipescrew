@@ -1,4 +1,4 @@
-from operators import *
+from planning.operators import *
 from pillar_state_py import State
 import numpy as np
 robot_pos_fqn = "frame:pose/position"
@@ -13,22 +13,33 @@ class Node:
         self.state_str =  state_str
         self.state = State.create_from_serialized_string(state_str)
         self.values = np.array(self.state.get_values_as_vec([block_pos_fqn, block_on_color_fqn]))
+        self.parent=parent
         if parent is None:
             self.cost = 0
         else:
             self.op = op  # op taken to get to this state
             self.cost = parent.cost + op.cost()
         self.f = self.cost
+
     def compute_heuristic(self, goal):
         goal_values = goal.get_values_as_vec([block_pos_fqn])
         my_values = self.state.get_values_as_vec([block_pos_fqn])
         return np.linalg.norm(goal_values-my_values)
 
     def __eq__(self, other):
+        if other is None:
+            return False
         my_values = self.state.get_values_as_vec([robot_pos_fqn, robot_orn_fqn, block_pos_fqn])
-        other_values = self.other.get_values_as_vec([robot_pos_fqn, robot_orn_fqn, block_pos_fqn])
-        return np.linalg.norm(my_values-other_values) < 0.02
+        other_values = other.state.get_values_as_vec([robot_pos_fqn, robot_orn_fqn, block_pos_fqn])
+        return np.linalg.norm(np.array(my_values)-np.array(other_values)) < 0.02
 
+    def __hash__(self):
+        return 17
+
+    def __str__(self):
+        block_pos = self.state.get_values_as_vec([block_pos_fqn])
+        robot_pos = self.state.get_values_as_vec([block_pos_fqn])
+        return "Cost : " + str(self.cost) + " "+str(np.round(block_pos, 2))+ str(np.round(robot_pos, 2))
 
 class Planner:
     def __init__(self):
@@ -39,35 +50,41 @@ class Planner:
         A* search
         """
         start_node = Node(start)
+        goal_node = Node(goal)
         open = [start_node]
-        closed = []
+        closed = {}
         #make discrete action space
         discrete_actions = []
-        for dir in [0,1,2,3]:
+        for dir in [1]:
             discrete_actions.append(GoToSide(dir))
-            for amounts in [0.05, 0.1, 0.15]:
-                T = 10*amounts
-                discrete_actions.append(PushInDir(amount, T))
+            for amount in [0.05]:
+                T = 10*amount
+                discrete_actions.append(PushInDir(dir, amount, T))
         while (len(open) > 0):
-            best_i = max(open, key = lambda node: node.g)
+            best_i = np.argmax([node.cost for node in open])
             curr_node = open.pop(best_i)
+            if curr_node == goal_node:
+                print("Found goal!")
+                break
             closed[curr_node] = curr_node.f
             for op in discrete_actions:
                 #make sure precond satisfied
-                if not op.precond(curr_node.state):
+                if not op.precond(curr_node.state.get_serialized_string()):
                     continue
-                new_node = Node(op.transition_model(curr_node.state.to_serialized_string(), op))
+                new_node = Node(op.transition_model(curr_node.state.get_serialized_string(), op))
+                new_node.parent = curr_node
                 if new_node in closed:
                     continue
                 if collision_fn(new_node.state):
-                    closed.append(new_node)
+                    closed[new_node] = new_node.cost
                     continue
                 #check for collision
                 open.append(new_node)
         #backtrack
         plan = []
+        print(curr_node)
         while (curr_node.parent != start_node):
-            plan.append(curr_node.copy())
+            plan.append(curr_node)
             curr_node = curr_node.parent
         return plan
 
@@ -75,23 +92,13 @@ class Planner:
 
 def collision_fn(state):
     #TODO will there be any collision from this state applying this action?
-    obs_pos = state.get_values_as_vec(["frame:obstacle/position"])
-    obs_width =state.get_values_as_vec(["constants/obstacle_width"])
-    block_pos = state.get_values_as_vec(["frame:block/position"])
-    block_width =state.get_values_as_vec(["constants/block_width"])
+    obs_pos = state.get_values_as_vec(["frame:obstacle/position"])[0]
+    obs_width =state.get_values_as_vec(["constants/obstacle_width"])[0]
+    block_pos = state.get_values_as_vec(["frame:block:pose/position"])[0]
+    block_width =state.get_values_as_vec(["constants/block_width"])[0]
     #approximate with circles
-    max_dist = block_width*((2)**0.5)+obs_width((2)**0.5)
+    max_dist = block_width*((2)**0.5)+obs_width*((2)**0.5)
     if np.linalg.norm(obs_pos-block_pos) < max_dist:
         return True
     return False
     #does the line pass through any points in the obstace?
-
-
-
-
-
-
-
-
-
-
