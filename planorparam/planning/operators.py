@@ -82,7 +82,6 @@ class GoToSide(Operator):
     def pillar_state_to_feature(self,pillar_state):
         return []
     def transition_model(self, state, action):
-        import ipdb; ipdb.set_trace()
         return self._transition_model.predict(state, action)
     def cost(self):
         return 1
@@ -100,7 +99,7 @@ class PushInDir(Operator):
     def execute_prim(self, env):
         env.push_in_dir(self.sidenum, self.amount, self.T)
     def cost(self):
-        return self.amount
+        return self.amount+1
     def precond(self, state_str):
         state = State.create_from_serialized_string(state_str)
         robot_pos = state.get_values_as_vec([robot_pos_fqn])
@@ -118,7 +117,6 @@ class PushInDir(Operator):
         return gripper_pos_close and orn_close
 
     def transition_model(self, state, action):
-        import ipdb; ipdb.set_trace()
         return self._transition_model.predict(state, action)
 
     def monitor_execution(self, env):

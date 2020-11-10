@@ -325,13 +325,25 @@ def test_agent_collect_info():
 def test_agent_classify():
     agent = Agent("test_collect_info_gptest")
     agent.train_classifier()
-def test_planner():
+def test_one_push_planner():
     vec_env, custom_draws = make_block_push_env(two_d=True)
     start_state_str = vec_env.get_pillar_state()[0]
     start_state = State.create_from_serialized_string(start_state_str)
     goal_state = State.create_from_serialized_string(start_state_str)
     goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
     goal_pose[0] -= 0.05
+    goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
+    planner = Planner()
+    planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
+
+def test_two_pushes_planner():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    start_state_str = vec_env.get_pillar_state()[0]
+    start_state = State.create_from_serialized_string(start_state_str)
+    goal_state = State.create_from_serialized_string(start_state_str)
+    goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
+    goal_pose[0] -= 0.05
+    goal_pose[2] -= 0.05
     goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
     planner = Planner()
     planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
@@ -348,7 +360,8 @@ def test_planner():
 #test_agent_collect_info()
 #test_agent_classify()
 #test_red()
-test_planner()
+#test_one_push_planner()
+test_two_pushes_planner()
 #test_pillar_state()
 #test_anomaly()
 #test_short_goal()

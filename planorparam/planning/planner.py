@@ -39,7 +39,7 @@ class Node:
     def __str__(self):
         block_pos = self.state.get_values_as_vec([block_pos_fqn])
         robot_pos = self.state.get_values_as_vec([robot_pos_fqn])
-        return "Cost : " + str(self.cost) + " "+str(np.round(block_pos, 2))+ str(np.round(robot_pos, 2))
+        return "Cost : " + str(self.cost) + " block pose: "+str(np.round(block_pos, 2))+ "robot pose :" +str(np.round(robot_pos, 2))
 
 class Planner:
     def __init__(self):
@@ -57,14 +57,13 @@ class Planner:
         discrete_actions = []
         for dir in [0,1,2,3]:
             discrete_actions.append(GoToSide(dir))
-            for amount in [0.05, 0.1]:
+            for amount in [0.05, 0.1, 0.15, 0.2]:
                 T = 10*amount
                 discrete_actions.append(PushInDir(dir, amount, T))
         while (len(open) > 0):
-            best_i = np.argmax([node.cost for node in open])
+            best_i = np.argmin([node.cost for node in open])
             curr_node = open.pop(best_i)
             print("Expanding", curr_node)
-            import ipdb; ipdb.set_trace()
             if is_goal(curr_node, goal_node):
                 print("Found goal!")
                 break
@@ -75,9 +74,8 @@ class Planner:
                     #print("Precond for ", op, "Not satisfied by", curr_node)
                     #import ipdb; ipdb.set_trace()
                     continue
-                new_node = Node(op.transition_model(curr_node.state.get_serialized_string(), op))
+                new_node = Node(op.transition_model(curr_node.state.get_serialized_string(), op), parent=curr_node, op=op)
                 print("New node", new_node, " from ", op)
-                new_node.parent = curr_node
                 if new_node in closed:
                     continue
                 if collision_fn(new_node.state):

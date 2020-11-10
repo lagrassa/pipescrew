@@ -47,7 +47,6 @@ class GoToSideTransitionModel:
                              current_block_state[2] + amount * np.cos(self.dir_to_rpy[dir][2])])
         
         new_state.set_values_from_vec([robot_pos_fqn],next_robot_state_np.tolist())
-        import ipdb; ipdb.set_trace()
         new_state.set_values_from_vec([robot_orn_fqn],des_quat.tolist())
         return new_state.get_serialized_string()
 
