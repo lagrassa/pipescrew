@@ -45,7 +45,7 @@ class Agent:
         scaler = preprocessing.StandardScaler().fit(varying_input_vec)
         input_vec_scaled = scaler.transform(varying_input_vec)
         deviations = np.linalg.norm(actual_states[:, :3] - expected_states[:, :3], axis=1)
-        kernel = C(1.0, (1e-3, 1e3)) * Matern(10,(1, 10), nu=1.5)
+        kernel = C(1.0, (1e-3, 1e3)) * Matern(10,(0.1, 10), nu=1.5)
         #kernel = C(1.0, (1e-3, 1e3)) * RBF(20, (1e-3, 1e2))
         #[0 and 1 ] of the varying version will be the interesting part
         gp = GPR(kernel=kernel, n_restarts_optimizer=9)
@@ -68,9 +68,8 @@ class Agent:
                 #draw them.
                 pose[0] -= (dims[0]/2.)
                 pose[1] -= (dims[1]/2.)
-                patch = matplotlib.patches.Rectangle(pose, dims[0], dims[1], fill=False, edgecolor=color, linewidth=20)
-                if True or color == [0.0, 0.0, 0.7]:
-                    ax.add_patch(patch)
+                patch = matplotlib.patches.Rectangle(pose, dims[0], dims[1], fill=False, edgecolor=color+[0.8,], linewidth=20)
+                ax.add_patch(patch)
             X = varying_input_vec
             y = deviations
             num_pts = 100
@@ -87,9 +86,10 @@ class Agent:
             # Zp = [gp.predict([(X0p[i, j], X1p[i, j]) for i in range(X0p.shape[0])]) for j in range(X0p.shape[1])]
             # Zp = np.array(Zp).T
 
-            ax.pcolormesh(X0p, X1p, Zp, cmap="Greens", vmin=-0.01)
+            block_shift = 0#0.07/2
+            ax.pcolormesh(X0p-block_shift, X1p-block_shift, Zp, cmap="Greens", vmin=-0.01)
             #ax.scatter(X0p, X1p, c=Zp, cmap="Greens", vmin=-0.1)
-            plot = ax.scatter(X[:,0], X[:,1], c=deviations, cmap="Greens", vmin=-0.01, edgecolor="k")
+            plot = ax.scatter(X[:,0]-block_shift, X[:,1]-block_shift, c=deviations, cmap="Greens", vmin=-0.01, edgecolor="k")
             #ax.scatter(X[:,0], X[:,1], c=deviations_pred, cmap="Greens", vmin=-0.05)
             x_max = 0.3
             x_min = -0.3

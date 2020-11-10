@@ -82,6 +82,7 @@ class GoToSide(Operator):
     def pillar_state_to_feature(self,pillar_state):
         return []
     def transition_model(self, state, action):
+        import ipdb; ipdb.set_trace()
         return self._transition_model.predict(state, action)
     def cost(self):
         return 1
@@ -110,13 +111,14 @@ class PushInDir(Operator):
         robot_des_pos = np.array([block_pos[0] + delta_side * np.sin(dir_to_rpy[self.sidenum][2]),
                                  block_pos[1],
                                  block_pos[2] + delta_side * np.cos(dir_to_rpy[self.sidenum][2])])
-        gripper_pos_close = np.linalg.norm(robot_des_pos-robot_pos < 0.03)
+        gripper_pos_close = np.linalg.norm(robot_des_pos-robot_pos )< 0.03
         des_quat = quat_to_np(rpy_to_quat(np.array(dir_to_rpy[self.sidenum])), format="wxyz")
         orn_dist = Quaternion.absolute_distance(Quaternion(des_quat), Quaternion(robot_orn))
         orn_close = orn_dist < 0.01
         return gripper_pos_close and orn_close
 
     def transition_model(self, state, action):
+        import ipdb; ipdb.set_trace()
         return self._transition_model.predict(state, action)
 
     def monitor_execution(self, env):

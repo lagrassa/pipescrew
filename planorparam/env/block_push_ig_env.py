@@ -1,8 +1,7 @@
 import numpy as np
 from carbongym import gymapi
 from carbongym_utils.assets import GymFranka, GymBoxAsset, GymURDFAsset
-from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, \
-    quat_to_rot, vec3_to_np
+from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, quat_to_rot, vec3_to_np
 import argparse
 from autolab_core import YamlConfig
 from gym.spaces import Box, Discrete
@@ -20,7 +19,6 @@ def custom_draws(scene):
         draw_transforms(scene.gym, scene.viewer, [env_ptr], [ee_transform])
 
 class GymFrankaBlockPushEnv(GymFrankaVecEnv):
-
     def __init__(self, cfg):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
         self.max_steps_per_movement = 400
@@ -338,6 +336,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._block.set_rb_transforms(env_ptr, block_ah, [block_pose])
 
         self._scene.render()
+        self._update_state()
         #self.goto_start(teleport=False)
 
     def _init_action_space(self, cfg):
