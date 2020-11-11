@@ -342,8 +342,20 @@ def test_two_pushes_planner():
     start_state = State.create_from_serialized_string(start_state_str)
     goal_state = State.create_from_serialized_string(start_state_str)
     goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
-    goal_pose[0] -= 0.05
+    goal_pose[0] -= 0.15
     goal_pose[2] -= 0.05
+    goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
+    planner = Planner()
+    planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
+
+def test_planner_to_goal():
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    start_state_str = vec_env.get_pillar_state()[0]
+    start_state = State.create_from_serialized_string(start_state_str)
+    goal_state = State.create_from_serialized_string(start_state_str)
+    goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
+    goal_pose[0] = 0.2
+    goal_pose[2] = 0.04
     goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
     planner = Planner()
     planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
@@ -361,7 +373,8 @@ def test_two_pushes_planner():
 #test_agent_classify()
 #test_red()
 #test_one_push_planner()
-test_two_pushes_planner()
+#test_two_pushes_planner()
+test_planner_to_goal()
 #test_pillar_state()
 #test_anomaly()
 #test_short_goal()
