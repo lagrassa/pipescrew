@@ -1,10 +1,13 @@
 #from .planning import Planner
 from itertools import product
-
+from sklearn.model_selection import RandomizedSearchCV
 import numpy as np
 from sklearn import preprocessing
 from sklearn.gaussian_process import GaussianProcessRegressor as GPR
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, Matern
+from sklearn.ensemble import RandomForestRegressor as RFR
+from planning.planner import Node
+from env.block_push_ig_env import  color_block_is_on
 import matplotlib.pyplot as plt
 class Agent:
 
@@ -24,13 +27,39 @@ class Agent:
         Execute series of operators. Results are saved.
         """
         for op in plan:
+            if isinstance(op, Node):
+                op = op.op
             op.cfg = self.agent_cfg
             op.monitor_execution(vec_env)
 
+    def setup_random_forest(self):
+        n_estimators = [int(x) for x in np.linspace(start=20, stop=1000, num=10)]
+        # Number of features to consider at every split
+        max_features = ['auto', 'sqrt']
+        # Maximum number of levels in tree
+        max_depth = [int(x) for x in np.linspace(10, 110, num=11)]
+        max_depth.append(None)
+        # Minimum number of samples required to split a node
+        min_samples_split = [2, 5, 10]
+        # Minimum number of samples required at each leaf node
+        min_samples_leaf = [1, 2, 4]
+        # Method of selecting samples for training each tree
+        bootstrap = [True, False]  # Create the random grid
+        rf = RFR()
+        random_grid = {'n_estimators': n_estimators,
+                       'max_features': max_features,
+                       'max_depth': max_depth,
+                       'min_samples_split': min_samples_split,
+                       'min_samples_leaf': min_samples_leaf,
+                       'bootstrap': bootstrap}
+        return RandomizedSearchCV(estimator=rf, param_distributions=random_grid, n_iter=30, cv=3, verbose=0,
+                                            random_state=42, n_jobs=12)
 
     def train_classifier(self, plot_classification =True):
         #load data, train classifier. Try KLR
         operator_name = "PushInDir"
+        fit_gp = False
+        fit_rfr =True
         fn = self.agent_cfg["data_path"]+operator_name+".npy"
         data = np.load(fn, allow_pickle=True).all()
         actual_states = data["actual_next_states"]
@@ -41,16 +70,26 @@ class Agent:
         std_vec = np.std(input_vec, axis=0)
         std_thresh = 0.01
         varying_input_vec = input_vec[:,std_vec > std_thresh]
-        varying_input_vec = varying_input_vec[:,[1,0]] #for plotting, will give worse results
+        only_color = False
+        varying_input_vec = varying_input_vec[:,[1,0, 2]] #for plotting, will give worse results 2,3,4
+        X = varying_input_vec[:]
+        if only_color:
+            varying_input_vec = varying_input_vec[:,[2]]
         scaler = preprocessing.StandardScaler().fit(varying_input_vec)
         input_vec_scaled = scaler.transform(varying_input_vec)
         deviations = np.linalg.norm(actual_states[:, :3] - expected_states[:, :3], axis=1)
-        kernel = C(1.0, (1e-3, 1e3)) * Matern(10,(0.1, 10), nu=1.5)
-        #kernel = C(1.0, (1e-3, 1e3)) * RBF(20, (1e-3, 1e2))
+        #kernel = C(1.0, (1e-3, 1e3)) * Matern(5,(1, 5), nu=2.5)
+        kernel = C(1.0, (1e-3, 1e3)) * Matern(0.5,(0.5, 5), nu=2.5)
+        #kernel = C(1.0, (1e-3, 1e3)) * RBF(1, (1e-3, 1e2))
         #[0 and 1 ] of the varying version will be the interesting part
-        gp = GPR(kernel=kernel, n_restarts_optimizer=9)
-        gp.fit(input_vec_scaled, deviations)
-        deviations_pred, sigma = gp.predict(input_vec_scaled, return_std=True)
+        gp = GPR(kernel=kernel, n_restarts_optimizer=20)
+        rfr = self.setup_random_forest()
+        if fit_rfr:
+            rfr.fit(input_vec_scaled, deviations)
+            deviations_pred = rfr.predict(input_vec_scaled)
+        if fit_gp:
+            gp.fit(input_vec_scaled, deviations)
+            deviations_pred, sigma = gp.predict(input_vec_scaled, return_std=True)
         #plot using 2D
         print("Error", np.linalg.norm(deviations_pred-deviations))
         # Input space
@@ -70,14 +109,26 @@ class Agent:
                 pose[1] -= (dims[1]/2.)
                 patch = matplotlib.patches.Rectangle(pose, dims[0], dims[1], fill=False, edgecolor=color+[0.8,], linewidth=20)
                 ax.add_patch(patch)
-            X = varying_input_vec
             y = deviations
-            num_pts = 100
+            num_pts = 50
             x1 = np.linspace(X[:, 0].min()-0.05, X[:, 0].max()+0.05, num_pts)  # p
             x2 = np.linspace(X[:, 1].min()-0.05, X[:, 1].max()+0.05, num_pts)  # q
             x = (np.array([x1, x2])).T
             x1x2 = np.array(list(product(x1, x2)))
-            y_pred, MSE = gp.predict(scaler.transform(x1x2), return_std=True)
+            x1x2_incl_color = np.zeros((x1x2.shape[0], X.shape[1]))
+            x1x2_incl_color[:,:2] = x1x2
+            for i in range(x1x2.shape[0]):
+                x1x2_incl_color[i,2:] =  color_block_is_on(cfg, np.array([x1x2[i,1], 0, x1x2[i,0]]))[0] #match the expected pose layout
+            #get corresponding colors here
+            if only_color:
+                if fit_gp:
+                    y_pred, MSE = gp.predict(scaler.transform(x1x2_incl_color[:,1:2]).reshape(-1,1), return_std=True)
+            else:
+                if fit_gp:
+                    y_pred, MSE = gp.predict(scaler.transform(x1x2_incl_color), return_std=True)
+                if fit_rfr:
+                    y_pred = rfr.predict(scaler.transform(x1x2_incl_color))
+
             X0p, X1p = x1x2[:,0].reshape(num_pts,num_pts), x1x2[:,1].reshape(num_pts,num_pts)
             Zp = np.reshape(y_pred,(num_pts,num_pts))
 

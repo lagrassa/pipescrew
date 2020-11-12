@@ -1,6 +1,7 @@
 from planning.operators import *
 from pillar_state_py import State
 import numpy as np
+
 robot_pos_fqn = "frame:pose/position"
 robot_orn_fqn = "frame:pose/quaternion"
 block_pos_fqn = "frame:block:pose/position"
@@ -16,6 +17,7 @@ class Node:
         self.parent=parent
         if parent is None:
             self.cost = 0
+            self.op = None
         else:
             self.op = op  # op taken to get to this state
             self.cost = parent.cost + op.cost()
@@ -39,12 +41,12 @@ class Node:
     def __str__(self):
         block_pos = self.state.get_values_as_vec([block_pos_fqn])
         robot_pos = self.state.get_values_as_vec([robot_pos_fqn])
-        return "Cost : " + str(self.cost) + " block pose: "+str(np.round(block_pos, 2))+ "robot pose :" +str(np.round(robot_pos, 2))
+        return "Cost : " + str(self.cost) + " block pose: "+str(np.round(block_pos, 2))+ "robot pose :" +str(np.round(robot_pos, 2)) + " op: "+str(self.op)
 
 class Planner:
-    def __init__(self):
-        pass
-    def plan(self, start, goal):
+    def __init__(self, env_config):
+        self.env_config =env_config
+    def plan(self, start, goal, goal_tol = 0.02):
         """
         Given a pillar start state, output a series of operators to reach the goal state with high probability
         A* search
@@ -55,10 +57,10 @@ class Planner:
         closed = {}
         #make discrete action space
         discrete_actions = []
-        for dir in [0,1,2,3]:
+        for dir in [1]:
             discrete_actions.append(GoToSide(dir))
             for amount in [0.05, 0.1, 0.15, 0.2]:
-                T = 10*amount
+                T = (5+(10*amount))/self.env_config['scene']['gym']['dt']
                 discrete_actions.append(PushInDir(dir, amount, T))
         num_expanded = 0
         while (len(open) > 0):
@@ -68,7 +70,7 @@ class Planner:
             num_expanded +=1
             if num_expanded % 100 == 0:
                 print("Num expanded", num_expanded)
-            if is_goal(curr_node, goal_node):
+            if is_goal(curr_node, goal_node, tol=goal_tol):
                 print("Found goal!")
                 break
             closed[curr_node] = curr_node.f
@@ -80,7 +82,7 @@ class Planner:
                     continue
                 new_node = Node(op.transition_model(curr_node.state.get_serialized_string(), op), parent=curr_node, op=op)
                 new_node.f = new_node.cost + new_node.compute_heuristic(goal_node)
-                #print("New node", new_node, " from ", op)
+                #print("New node", new_node, " from ", op, " parent is ", curr_node)
                 if new_node in closed:
                     continue
                 if collision_fn(new_node.state):
@@ -91,13 +93,13 @@ class Planner:
         #backtrack
         plan = []
         print(curr_node)
-        while (curr_node.parent != start_node):
+        while (curr_node.parent is not None):
             plan.append(curr_node)
             curr_node = curr_node.parent
         print("Found plan of length", len(plan))
-        return plan
+        return plan[::-1]
 
-def is_goal(node, goal_node, tol=0.1):
+def is_goal(node, goal_node, tol=0.02):
     my_values = node.state.get_values_as_vec([block_pos_fqn])
     goal_values = goal_node.state.get_values_as_vec([block_pos_fqn])
     return np.linalg.norm(np.array(my_values)-np.array(goal_values)) < tol

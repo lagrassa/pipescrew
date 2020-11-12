@@ -95,7 +95,7 @@ obstacle:
         height: 0.07
         depth: 0.07
     pose:
-        x: 0.8
+        x: 0.0
         y: 0.35
     shape_props:
         friction: 1
@@ -128,9 +128,9 @@ boardpiece_blue2:
     dims:
         width: 0.15
         height: 0.02
-        depth: 0.5
+        depth: 0.6
     pose:
-        x: -0.05
+        x: 0.0
         y: 0.1995
     shape_props:
         friction: 0.07
@@ -200,10 +200,10 @@ boardpiece_redupperleft:
     dims:
         width: 0.15
         height: 0.02
-        depth: 0.1
+        depth: 0.2
     pose:
-        x: 0.25
-        y: 0.2
+        x: 0
+        y: 0.15
     shape_props:
         friction: 0.9
         rolling_friction: 0.01

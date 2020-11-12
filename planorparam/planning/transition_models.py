@@ -33,7 +33,10 @@ class GoToSideTransitionModel:
         state = State.create_from_serialized_string(state_str)
         new_state = State.create_from_serialized_string(state_str)
         #take current state
-        dir = action.sidenum
+        if isinstance(action, list):
+            dir = action[0]
+        else:
+            dir = action.sidenum
         robot_pos_fqn = "frame:pose/position"
         robot_orn_fqn = "frame:pose/quaternion"
         block_pos_fqn = "frame:block:pose/position"
@@ -67,9 +70,12 @@ class BlockPushSimpleTransitionModel():
         state = State.create_from_serialized_string(state_str)
         new_state = State.create_from_serialized_string(state_str)
         #take current state
-        dir = action.sidenum
-        amount = action.amount
-        T = action.T
+        if isinstance(action, list):
+            dir, amount, T = action
+        else:
+            dir = action.sidenum
+            amount = action.amount
+            T = action.T
         robot_pos_fqn = "frame:pose/position"
         robot_orn_fqn = "frame:pose/quaternion"
         block_pos_fqn = "frame:block:pose/position"

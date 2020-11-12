@@ -10,7 +10,7 @@ from env.block_push_ig_env import GymFrankaBlockPushEnv
 from planning.blockpushpolicy import BlockPushPolicy
 from planning.transition_models import LearnedTransitionModel, BlockPushSimpleTransitionModel
 from planning.operators import      *
-from planning.planner import Planner
+from planning.planner import Planner, Node
 from pillar_state_py import State
 
 def make_block_push_env(two_d = False):
@@ -251,6 +251,22 @@ def blue_skeleton():
     dir_next = 0
     max_T = 500
     cfg = {"data_path": "data/blueonly/"}
+    actions.append(GoToSide(dir_next))
+    actions.append(PushInDir(dir_next, 0.1, max_T * 2, cfg=cfg))
+    actions.append(GoToSide(dir))
+    actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
+    actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
+    actions.append(PushInDir(dir, 0.08, max_T, cfg=cfg))
+    actions.append(GoToSide(dir_next))
+    actions.append(PushInDir(dir_next, 0.12, max_T * 2, cfg=cfg))
+    return actions
+
+def blue_skeleton_fails_on_red():
+    actions = []
+    dir = 1
+    dir_next = 0
+    max_T = 500
+    cfg = {"data_path": "data/blueonly/"}
     actions.append(GoToSide(dir))
     actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
     actions.append(PushInDir(dir, 0.1, max_T, cfg=cfg))
@@ -318,13 +334,31 @@ def test_agent_collect_info():
     green_plan = green_skeleton()
     blue_plan = blue_skeleton()
     #plans = [blue_plan, green_plan, red_plan]
-    plans = [green_plan]
+    plans = [red_plan]
     agent = Agent("test_collect_info")
     agent.collect_transition_data(vec_env, plans)
 
 def test_agent_classify():
-    agent = Agent("test_collect_info_gptest")
+    #agent = Agent("test_collect_info_gptest")
+    agent = Agent("test_collect_info")
     agent.train_classifier()
+def test_precond():
+    #one where precond is false, one where it's true.
+    vec_env, custom_draws = make_block_push_env(two_d=True)
+    start_state_str = vec_env.get_pillar_state()[0]
+    start_state = State.create_from_serialized_string(start_state_str)
+    start_node = Node(start_state_str)
+    goto_dir_op = GoToSide(1)
+    goto_dir2_op = GoToSide(2)
+    after_dir1_node =Node(goto_dir_op.transition_model(start_node.state.get_serialized_string(), goto_dir_op), parent=start_node, op=goto_dir_op)
+    after_dir2_node =Node(goto_dir2_op.transition_model(start_node.state.get_serialized_string(), goto_dir2_op), parent=start_node, op=goto_dir2_op)
+    pushin_dir_op = PushInDir(1, 0.05, 50,cfg=vec_env.cfg)
+    assert(not pushin_dir_op.precond(start_state_str))
+    assert(pushin_dir_op.precond(after_dir1_node.state.get_serialized_string()))
+    assert(not pushin_dir_op.precond(after_dir2_node.state.get_serialized_string()))
+    print("Precond test passed")
+
+
 def test_one_push_planner():
     vec_env, custom_draws = make_block_push_env(two_d=True)
     start_state_str = vec_env.get_pillar_state()[0]
@@ -333,8 +367,11 @@ def test_one_push_planner():
     goal_pose = np.array(start_state.get_values_as_vec([block_pos_fqn]))
     goal_pose[0] -= 0.05
     goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
-    planner = Planner()
-    planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
+    planner = Planner(vec_env.cfg)
+    one_push_plan = planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
+    plans = [one_push_plan]
+    agent = Agent("test_planner")
+    agent.collect_transition_data(vec_env, plans)
 
 def test_two_pushes_planner():
     vec_env, custom_draws = make_block_push_env(two_d=True)
@@ -345,7 +382,7 @@ def test_two_pushes_planner():
     goal_pose[0] -= 0.15
     goal_pose[2] -= 0.05
     goal_state.set_values_from_vec([block_pos_fqn], goal_pose.tolist())
-    planner = Planner()
+    planner = Planner(vec_env.cfg)
     planner.plan(start_state.get_serialized_string(), goal_state.get_serialized_string())
 
 def test_planner_to_goal():
@@ -370,11 +407,13 @@ def test_planner_to_goal():
 #test_goto_side()#test_push_in_dir()
 #test_blue_only()
 #test_agent_collect_info()
-#test_agent_classify()
+test_agent_classify()
 #test_red()
 #test_one_push_planner()
+#test_precond()
 #test_two_pushes_planner()
-test_planner_to_goal()
+#test_planner_to_goal()
 #test_pillar_state()
 #test_anomaly()
 #test_short_goal()
+#test_green()

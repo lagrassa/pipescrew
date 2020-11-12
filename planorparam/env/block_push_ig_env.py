@@ -22,6 +22,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
     def __init__(self, cfg):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
         self.max_steps_per_movement = 400
+        self.cfg = cfg
         super().__init__(cfg, n_inter_steps=cfg["env"]["n_inter_steps"], inter_step_cb=render_func, auto_reset_after_done=False)
         #urdf_fn = "/home/lagrassa/git/carbongym/assets/urdf/franka_description/robots/franka_panda.urdf"
         #urdf_fn="/home/lagrassa/git/planorparam/models/robots/model.urdf"
@@ -183,7 +184,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
         if max_t is None:
             max_t = self.max_steps_per_movement
-        for i in range(max_t):
+        for i in range(int(max_t)):
             self._scene.step()
             if i % 10:
                 self.render(custom_draws=custom_draws)
@@ -452,6 +453,6 @@ def color_block_is_on(cfg, pose):
             width = width[0]
         if isinstance(depth, tuple):
             depth = depth[0]
-        if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
-            if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
+        if (pose[2] > center[2]-depth/2. and pose[2] < center[2]+depth/2. ):
+            if (pose[0] > center[0]-width/2. and pose[0] < center[0]+width/2.):
                 return cfg[board_name]["rb_props"]["color"]
