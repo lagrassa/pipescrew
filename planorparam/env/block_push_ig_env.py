@@ -1,8 +1,7 @@
 import numpy as np
 from carbongym import gymapi
 from carbongym_utils.assets import GymFranka, GymBoxAsset, GymURDFAsset
-from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, \
-    quat_to_rot, vec3_to_np
+from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, quat_to_rot, vec3_to_np
 import argparse
 from autolab_core import YamlConfig
 from gym.spaces import Box, Discrete
@@ -20,10 +19,10 @@ def custom_draws(scene):
         draw_transforms(scene.gym, scene.viewer, [env_ptr], [ee_transform])
 
 class GymFrankaBlockPushEnv(GymFrankaVecEnv):
-
     def __init__(self, cfg):
         render_func = lambda x, y, z: self.render(custom_draws=custom_draws)
         self.max_steps_per_movement = 400
+        self.cfg = cfg
         super().__init__(cfg, n_inter_steps=cfg["env"]["n_inter_steps"], inter_step_cb=render_func, auto_reset_after_done=False)
         #urdf_fn = "/home/lagrassa/git/carbongym/assets/urdf/franka_description/robots/franka_panda.urdf"
         #urdf_fn="/home/lagrassa/git/planorparam/models/robots/model.urdf"
@@ -95,10 +94,14 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         robot_orn_fqn = "frame:pose/quaternion"
         block_pos_fqn = "frame:block:pose/position"
         block_orn_fqn = "frame:block:pose/quaternion"
+        obs_pos_fqn = "frame:obstacle:pose/position"
+        obs_orn_fqn = "frame:obstacle:pose/quaternion"
         block_on_color_fqn ="frame:block:on_color"
         for env_index, env_ptr in enumerate(self._scene.env_ptrs):
             block_ah = self._scene.ah_map[env_index][self._block_name]
+            obs_ah = self._scene.ah_map[env_index][self._obstacle_name]
             block_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, block_ah)[0], format="wxyz")
+            obs_transform_np = transform_to_np(self._block.get_rb_transforms(env_ptr, obs_ah)[0], format="wxyz")
             ee_pose_np = transform_to_np(self._frankas[env_index].get_ee_transform(env_ptr, self._franka_name), format="wxyz")
             #all_cts = self._scene.gym.get_rigid_contacts(self._scene._sim) # check for between block and board
             #all_cts = all_cts[all_cts['env0'] != -1 & np.logical_not(np.isclose(all_cts['lambda'], 0))]
@@ -106,6 +109,8 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self.pillar_states[env_index].set_values_from_vec([robot_orn_fqn], ee_pose_np[3:].tolist())
             self.pillar_states[env_index].set_values_from_vec([block_pos_fqn], block_transform_np[:3].tolist())
             self.pillar_states[env_index].set_values_from_vec([block_orn_fqn], block_transform_np[3:].tolist())
+            self.pillar_states[env_index].set_values_from_vec([obs_pos_fqn], obs_transform_np[:3].tolist())
+            self.pillar_states[env_index].set_values_from_vec([obs_orn_fqn], obs_transform_np[3:].tolist())
             color = color_block_is_on(self._cfg, block_transform_np)
             self.pillar_states[env_index].set_values_from_vec([block_on_color_fqn], color)
 
@@ -179,7 +184,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
         self._frankas[env_index].set_ee_transform(env_ptr, env_index, self._franka_name, transformed_pt)
         if max_t is None:
             max_t = self.max_steps_per_movement
-        for i in range(max_t):
+        for i in range(int(max_t)):
             self._scene.step()
             if i % 10:
                 self.render(custom_draws=custom_draws)
@@ -332,6 +337,7 @@ class GymFrankaBlockPushEnv(GymFrankaVecEnv):
             self._block.set_rb_transforms(env_ptr, block_ah, [block_pose])
 
         self._scene.render()
+        self._update_state()
         #self.goto_start(teleport=False)
 
     def _init_action_space(self, cfg):
@@ -447,6 +453,6 @@ def color_block_is_on(cfg, pose):
             width = width[0]
         if isinstance(depth, tuple):
             depth = depth[0]
-        if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
-            if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
+        if (pose[2] > center[2]-depth/2. and pose[2] < center[2]+depth/2. ):
+            if (pose[0] > center[0]-width/2. and pose[0] < center[0]+width/2.):
                 return cfg[board_name]["rb_props"]["color"]

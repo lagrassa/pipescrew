@@ -6,6 +6,8 @@ from sklearn import preprocessing
 from sklearn.ensemble import RandomForestRegressor as RFR
 from sklearn.model_selection import RandomizedSearchCV
 from autolab_core import YamlConfig
+from carbongym_utils.math_utils import np_to_quat, np_to_vec3, transform_to_np_rpy, rpy_to_quat, transform_to_np, quat_to_np, \
+    quat_to_rot, vec3_to_np
 from pillar_state_py import State
 
 def color_block_is_on(cfg, pose):
@@ -18,7 +20,40 @@ def color_block_is_on(cfg, pose):
         if (pose[2] > center[2]-depth/0.5 and pose[2] < center[2]+depth/0.5 ):
             if (pose[0] > center[0]-width/0.5 and pose[0] < center[0]+depth/0.5):
                 return cfg[board_name]["rb_props"]["color"]
+class GoToSideTransitionModel:
+    def __init__(self, config_fn = "cfg/franka_block_push_two_d.yaml"):
+        self.step = self.predict
+        self.cfg = YamlConfig(config_fn)
+        self.dir_to_rpy= {0:[-np.pi/2,np.pi/2,0],
+                          1:[-np.pi/2,np.pi/2,np.pi/2],
+                          2:[-np.pi/2,np.pi/2,np.pi],
+                          3:[-np.pi/2,np.pi/2,1.5*np.pi]}
 
+    def predict(self, state_str, action):
+        state = State.create_from_serialized_string(state_str)
+        new_state = State.create_from_serialized_string(state_str)
+        #take current state
+        if isinstance(action, list):
+            dir = action[0]
+        else:
+            dir = action.sidenum
+        robot_pos_fqn = "frame:pose/position"
+        robot_orn_fqn = "frame:pose/quaternion"
+        block_pos_fqn = "frame:block:pose/position"
+        des_quat = quat_to_np(rpy_to_quat(np.array(self.dir_to_rpy[dir])), format="wxyz")
+        amount= 0.02 + self.cfg["block"]["dims"]["width"]/2
+        #precondition is that the robot is at the appropriate side, taken care of at another layer of abstraction
+        #if robot is "below" block, otherwise it's the same
+        current_block_state = state.get_values_as_vec([block_pos_fqn])
+        next_robot_state_np = np.array([current_block_state[0] + amount * np.sin(self.dir_to_rpy[dir][2]),
+                             current_block_state[1],
+                             current_block_state[2] + amount * np.cos(self.dir_to_rpy[dir][2])])
+        
+        new_state.set_values_from_vec([robot_pos_fqn],next_robot_state_np.tolist())
+        new_state.set_values_from_vec([robot_orn_fqn],des_quat.tolist())
+        return new_state.get_serialized_string()
+
+    
 class BlockPushSimpleTransitionModel():
     def __init__(self, config_fn = "cfg/franka_block_push_two_d.yaml"):
         self.step = self.predict
@@ -35,9 +70,12 @@ class BlockPushSimpleTransitionModel():
         state = State.create_from_serialized_string(state_str)
         new_state = State.create_from_serialized_string(state_str)
         #take current state
-        dir = action[0]
-        amount = action[1]
-        T = action[2]
+        if isinstance(action, list):
+            dir, amount, T = action
+        else:
+            dir = action.sidenum
+            amount = action.amount
+            T = action.T
         robot_pos_fqn = "frame:pose/position"
         robot_orn_fqn = "frame:pose/quaternion"
         block_pos_fqn = "frame:block:pose/position"
